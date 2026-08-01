@@ -4,6 +4,7 @@ import type {
   FaultType,
   TicketStatus,
   TopologySource,
+  LocalizationPrecision,
   TimelineEntry,
 } from '@pgm/shared';
 
@@ -17,6 +18,12 @@ const FaultBoundarySchema = new Schema(
       type: String,
       enum: ['recorded', 'inferred', 'unknown'] satisfies TopologySource[],
       required: true,
+    },
+    precision: {
+      type: String,
+      enum: ['EXACT_SPAN', 'ESTIMATED_SPAN', 'RANGE', 'DT_LEVEL'] satisfies LocalizationPrecision[],
+      required: true,
+      default: 'ESTIMATED_SPAN',
     },
     confidence: { type: Number, required: true, min: 0, max: 1 },
   },
@@ -87,6 +94,7 @@ const IncidentSchema = new Schema<IIncident & Document>(
     feederId: { type: String, required: true, index: true },
     dtId: { type: String, required: true, index: true },
     affectedPoleIds: [{ type: String }],
+    affectedPoleCount: { type: Number, required: true, default: 0 },
     boundary: { type: FaultBoundarySchema, required: true },
     pincode: { type: String, required: true },
     lat: { type: Number, required: true },

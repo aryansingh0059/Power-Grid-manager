@@ -192,6 +192,7 @@ export interface Incident {
   dtId: string;
   /** All pole IDs that went dark due to this fault. */
   affectedPoleIds: string[];
+  affectedPoleCount: number;
   boundary: FaultBoundary;
   pincode: string;
   lat: number; // approx. centre of affected area
