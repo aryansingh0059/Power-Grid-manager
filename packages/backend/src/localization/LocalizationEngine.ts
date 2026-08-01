@@ -1,6 +1,7 @@
-import type { TopologySource, LocalizationPrecision, PoleRecord } from '@pgm/shared';
+import type { TopologySource, LocalizationPrecision, ScheduledOutage } from '@pgm/shared';
 import type { TopologyIndex } from '../topology/TopologyIndex';
 import { TopologyInference, type InferredTopologyResult } from '../topology/TopologyInference';
+import { OutageEvaluator } from '../scheduler/OutageEvaluator';
 import type { LocalizedFault, ConfidenceBreakdown } from './types';
 
 export interface LocalizationInput {
@@ -10,6 +11,8 @@ export interface LocalizationInput {
   dtId?: string; // Optional: restrict to a single DT
   /** Optional DT location coordinates for topology inference if unrecorded */
   dtLocationMap?: Map<string, { lat: number; lon: number }>;
+  /** Optional scheduled outage records for cross-referencing */
+  outages?: ScheduledOutage[];
 }
 
 /**
@@ -29,7 +32,8 @@ export class LocalizationEngine {
     topologyIndex: TopologyIndex,
     poleStateMap: Map<string, boolean | null>,
     dtId: string,
-    dtLocationMap?: Map<string, { lat: number; lon: number }>
+    dtLocationMap?: Map<string, { lat: number; lon: number }>,
+    outages?: ScheduledOutage[]
   ): LocalizedFault[] {
     const poleIds = topologyIndex.getPoleIdsByDt(dtId);
     if (poleIds.length === 0) return [];
@@ -97,31 +101,44 @@ export class LocalizationEngine {
           false
         );
 
-        return [
-          {
-            faultType: 'dt_fault',
-            feederId,
-            dtId,
-            upstreamPoleId: null,
-            downstreamPoleId: rootIds[0],
-            boundaryDescription: `Distribution Transformer ${dtId} outage — all ${affectedPoleIds.length} poles dark`,
-            lat,
-            lon,
-            pincode,
-            affectedPoleIds,
-            affectedPoleCount: affectedPoleIds.length,
-            reasons: [
-              `Distribution Transformer ${dtId} has zero energized poles`,
-              `Root pole ${rootIds[0]} reported OFF/silent`,
-              `Topology source: ${topologySource}`,
-            ],
-            confidence: confidenceBreakdown.overallConfidence,
-            confidenceBreakdown,
-            topologySource,
-            precision: 'DT_LEVEL',
-            isAmbiguous: false,
-          },
-        ];
+        const dtFault: LocalizedFault = {
+          faultType: 'dt_fault',
+          feederId,
+          dtId,
+          upstreamPoleId: null,
+          downstreamPoleId: rootIds[0],
+          boundaryDescription: `Distribution Transformer ${dtId} outage — all ${affectedPoleIds.length} poles dark`,
+          lat,
+          lon,
+          pincode,
+          affectedPoleIds,
+          affectedPoleCount: affectedPoleIds.length,
+          reasons: [
+            `Distribution Transformer ${dtId} has zero energized poles`,
+            `Root pole ${rootIds[0]} reported OFF/silent`,
+            `Topology source: ${topologySource}`,
+          ],
+          confidence: confidenceBreakdown.overallConfidence,
+          confidenceBreakdown,
+          topologySource,
+          precision: 'DT_LEVEL',
+          isAmbiguous: false,
+        };
+
+        if (outages && outages.length > 0) {
+          const evalRes = OutageEvaluator.evaluateFault(dtFault, outages);
+          if (evalRes.isScheduledOutage) {
+            return [
+              {
+                ...dtFault,
+                faultType: 'scheduled_outage',
+                reasons: [...dtFault.reasons, evalRes.explanation],
+              },
+            ];
+          }
+        }
+
+        return [dtFault];
       }
     }
 
@@ -222,6 +239,25 @@ export class LocalizationEngine {
           }
         }
       }
+    }
+
+    if (outages && outages.length > 0) {
+      return faults.map((f) => {
+        const evalRes = OutageEvaluator.evaluateFault(f, outages);
+        if (evalRes.isScheduledOutage) {
+          return {
+            ...f,
+            faultType: 'scheduled_outage',
+            reasons: [...f.reasons, evalRes.explanation],
+          };
+        } else if (evalRes.conflictDetected) {
+          return {
+            ...f,
+            reasons: [...f.reasons, evalRes.explanation],
+          };
+        }
+        return f;
+      });
     }
 
     return faults;
