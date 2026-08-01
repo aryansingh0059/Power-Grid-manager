@@ -1,0 +1,12 @@
+node_modules
+packages/*/node_modules
+packages/*/dist
+.git
+.gitignore
+.env
+.env.*
+*.log
+coverage
+.nyc_output
+.DS_Store
+Thumbs.db
