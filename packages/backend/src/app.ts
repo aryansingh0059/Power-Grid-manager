@@ -3,6 +3,7 @@ import cors from 'cors';
 import { healthRouter } from './routes/health';
 import { telemetryRouter } from './routes/telemetry';
 import { incidentsRouter } from './routes/incidents';
+import { simulatorRouter } from './routes/simulator';
 
 const app = express();
 
@@ -13,6 +14,7 @@ app.use(express.json());
 app.use('/api/health', healthRouter);
 app.use('/api/telemetry', telemetryRouter);
 app.use('/api/incidents', incidentsRouter);
+app.use('/api/simulator', simulatorRouter);
 
 // 404 catch-all (keeps the response JSON)
 app.use((_req, res) => {
