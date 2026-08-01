@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { app } from './app';
 import { connectDB } from './db/connection';
+import { seedDatabaseIfNeeded } from './db/seed';
 
 const PORT = Number(process.env.PORT ?? 4000);
 const MONGO_URI = process.env.MONGO_URI ?? 'mongodb://localhost:27017/pgm';
@@ -8,6 +9,7 @@ const MONGO_URI = process.env.MONGO_URI ?? 'mongodb://localhost:27017/pgm';
 async function start(): Promise<void> {
   try {
     await connectDB(MONGO_URI);
+    await seedDatabaseIfNeeded();
   } catch (err) {
     // Start the HTTP server even if MongoDB is unavailable on boot.
     // The health endpoint will report db: "disconnected" in that case.
