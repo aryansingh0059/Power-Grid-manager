@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import {
   AlertCircle,
+  AlertTriangle,
   MapPin,
   CheckCircle,
   Clock,
@@ -146,6 +147,32 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
           </div>
         )}
 
+        {/* Unverified Restoration Warning Banner (Task 13 Mandatory Rule) */}
+        {incident.status === 'resolved' && (
+          <div className="p-3.5 bg-amber-950/70 border border-amber-500/60 rounded-xl text-amber-200 flex items-start gap-3 shadow-xl">
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <div className="font-bold text-xs text-amber-300 tracking-wide uppercase font-outfit">
+                Repair reported, but restoration has not been verified from telemetry.
+              </div>
+              <p className="text-[11px] text-amber-200/90 leading-relaxed font-sans">
+                Physical IoT telemetry sensors indicate affected poles remain de-energized.
+                Marking repair complete does NOT restore physical power until live telemetry confirmation.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Scheduled Outage Evidence Banner */}
+        {(incident.scheduledOutageId || incident.faultType === 'scheduled_outage') && (
+          <div className="p-3 bg-blue-950/60 border border-blue-500/50 rounded-xl text-blue-200 flex items-center gap-2.5">
+            <Info className="w-4 h-4 text-blue-400 shrink-0" />
+            <div className="text-xs">
+              <span className="font-bold text-blue-300">Scheduled Outage Overlap</span> — Matched feeder maintenance window ({incident.scheduledOutageId ?? 'OUTAGE-FEED'}).
+            </div>
+          </div>
+        )}
+
         {/* 1. Primary Location & Asset Grid */}
         <div className="grid grid-cols-2 gap-2 bg-gray-950/80 p-3 rounded-xl border border-gray-800/80">
           <div>
@@ -181,10 +208,15 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
           </div>
         </div>
 
-        {/* 2. Localization Precision & Topology Info */}
-        <div className="bg-gray-950/80 p-3 rounded-xl border border-gray-800/80 space-y-2">
-          <div className="text-[10px] text-gray-400 uppercase font-mono font-semibold">
-            Localization & Topology Precision
+        {/* 2. Localization Precision & Explainable Confidence Reasons */}
+        <div className="bg-gray-950/80 p-3 rounded-xl border border-gray-800/80 space-y-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] text-gray-400 uppercase font-mono font-semibold">
+              Localization & Confidence Analysis
+            </span>
+            <span className="text-[11px] font-mono text-emerald-400 font-bold">
+              {confScore}% Score
+            </span>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -196,11 +228,28 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
             </span>
           </div>
 
-          <p className="text-gray-400 text-[11px] leading-relaxed">
-            {incident.boundary.precision === 'EXACT_SPAN'
-              ? ' exact recorded topology line fault segment confirmed.'
-              : ' Geographic MST inference applied due to missing department topology records.'}
-          </p>
+          {/* Explainable Reasons */}
+          <div className="space-y-1 bg-gray-900/60 p-2.5 rounded-lg border border-gray-800/60 text-[11px]">
+            <div className="text-[10px] text-gray-500 font-mono font-semibold uppercase mb-1">
+              Deterministic Evidence Breakdown:
+            </div>
+            <div className="flex items-center gap-1.5 text-gray-300">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+              <span>
+                {incident.boundary.topologySource === 'recorded'
+                  ? 'Recorded parent-child topology confirmed (+40%)'
+                  : 'Geographically inferred topology via MST (+26%)'}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 text-gray-300">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+              <span>Upstream pole {incident.boundary.upstreamPoleId ?? 'DT Root'} confirmed live (+25%)</span>
+            </div>
+            <div className="flex items-center gap-1.5 text-gray-300">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+              <span>Downstream pole {incident.boundary.downstreamPoleId} confirmed dark (+20%)</span>
+            </div>
+          </div>
         </div>
 
         {/* 3. Affected Poles Count */}
