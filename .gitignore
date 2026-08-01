@@ -5,6 +5,8 @@ packages/*/node_modules/
 # Build outputs
 dist/
 packages/*/dist/
+*.tsbuildinfo
+packages/*/*.tsbuildinfo
 
 # Environment — never commit real secrets
 .env
