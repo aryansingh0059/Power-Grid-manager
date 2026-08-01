@@ -2,6 +2,7 @@ import type { TopologySource, LocalizationPrecision, ScheduledOutage } from '@pg
 import type { TopologyIndex } from '../topology/TopologyIndex';
 import { TopologyInference, type InferredTopologyResult } from '../topology/TopologyInference';
 import { OutageEvaluator } from '../scheduler/OutageEvaluator';
+import { ConfidenceCalculator } from './ConfidenceCalculator';
 import type { LocalizedFault, ConfidenceBreakdown } from './types';
 
 export interface LocalizationInput {
@@ -101,6 +102,17 @@ export class LocalizationEngine {
           false
         );
 
+        const confResult = ConfidenceCalculator.calculate({
+          topologySource,
+          precision: 'DT_LEVEL',
+          upstreamPoleId: null,
+          downstreamPoleId: rootIds[0],
+          affectedPoleIds,
+          topologyIndex: activeIndex,
+          poleStateMap,
+          isAmbiguous: false,
+        });
+
         const dtFault: LocalizedFault = {
           faultType: 'dt_fault',
           feederId,
@@ -113,12 +125,8 @@ export class LocalizationEngine {
           pincode,
           affectedPoleIds,
           affectedPoleCount: affectedPoleIds.length,
-          reasons: [
-            `Distribution Transformer ${dtId} has zero energized poles`,
-            `Root pole ${rootIds[0]} reported OFF/silent`,
-            `Topology source: ${topologySource}`,
-          ],
-          confidence: confidenceBreakdown.overallConfidence,
+          reasons: confResult.reasons,
+          confidence: confResult.score,
           confidenceBreakdown,
           topologySource,
           precision: 'DT_LEVEL',
@@ -191,6 +199,17 @@ export class LocalizationEngine {
               precision = 'ESTIMATED_SPAN';
             }
 
+            const confResult = ConfidenceCalculator.calculate({
+              topologySource,
+              precision,
+              upstreamPoleId: currId,
+              downstreamPoleId: childId,
+              affectedPoleIds: downstreamSubtree,
+              topologyIndex: activeIndex,
+              poleStateMap,
+              isAmbiguous,
+            });
+
             const confidenceBreakdown = LocalizationEngine.calculateConfidence(
               topologySource,
               downstreamSubtree,
@@ -215,14 +234,8 @@ export class LocalizationEngine {
               pincode: downstreamPole.pincode,
               affectedPoleIds: downstreamSubtree,
               affectedPoleCount: downstreamSubtree.length,
-              reasons: [
-                `Upstream pole ${currId} confirmed ON or power pass-through`,
-                `Downstream pole ${childId} confirmed OFF`,
-                `${downstreamSubtree.length} poles dark in downstream subtree`,
-                `Topology source: ${topologySource} (Precision: ${precision})`,
-                ...(isAmbiguous ? ['Geometric ambiguity detected among candidate parent poles'] : []),
-              ],
-              confidence: confidenceBreakdown.overallConfidence,
+              reasons: confResult.reasons,
+              confidence: confResult.score,
               confidenceBreakdown,
               topologySource,
               precision,

@@ -62,7 +62,7 @@ describe('Geographic Topology Inference Engine & Missing Topology Strategy', () 
     expect(f.topologySource).toBe('inferred');
     expect(f.precision).toBe('RANGE'); // Degraded to RANGE due to ambiguity!
     expect(f.isAmbiguous).toBe(true);
-    expect(f.confidence).toBeLessThan(0.70); // Lower confidence for ambiguous range
+    expect(f.confidence).toBeLessThan(70); // Lower confidence for ambiguous range
   });
 
   it('3. Missing-device boundary: handles poles without telemetry gracefully', () => {
