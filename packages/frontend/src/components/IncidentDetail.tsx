@@ -10,8 +10,11 @@ import {
   Info,
   ExternalLink,
   ShieldCheck,
+  Sparkles,
+  Bot,
 } from 'lucide-react';
 import type { Incident, TimelineEntry } from '@pgm/shared';
+import { ApiClient } from '../api/client';
 
 interface IncidentDetailProps {
   incident: Incident | null;
@@ -33,6 +36,9 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
   const [showCrewForm, setShowCrewForm] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [aiSummary, setAiSummary] = useState<string | null>(null);
+  const [aiProvider, setAiProvider] = useState<string | null>(null);
+  const [isAiLoading, setIsAiLoading] = useState(false);
 
   if (!incident) {
     return (
@@ -101,6 +107,19 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
       setActionError((err as Error).message);
     } finally {
       setActionLoading(false);
+    }
+  };
+
+  const handleGenerateAiSummary = async () => {
+    setIsAiLoading(true);
+    try {
+      const res = await ApiClient.explainIncident(incident.incidentId);
+      setAiSummary(res.summary);
+      setAiProvider(res.providerUsed === 'openai' ? `OpenAI ${res.modelUsed ?? ''}` : 'System Fallback (Deterministic)');
+    } catch (err: unknown) {
+      setActionError((err as Error).message);
+    } finally {
+      setIsAiLoading(false);
     }
   };
 
@@ -250,6 +269,36 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
               <span>Downstream pole {incident.boundary.downstreamPoleId} confirmed dark (+20%)</span>
             </div>
           </div>
+        </div>
+
+        {/* 3. AI Incident Explanation Box */}
+        <div className="bg-gray-950/80 p-3 rounded-xl border border-gray-800/80 space-y-2">
+          <div className="flex items-center justify-between">
+            <div className="text-[10px] text-gray-400 uppercase font-mono font-semibold flex items-center gap-1.5">
+              <Bot className="w-3.5 h-3.5 text-amber-400" />
+              AI Operational Summary
+            </div>
+            {aiProvider && (
+              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-mono">
+                {aiProvider}
+              </span>
+            )}
+          </div>
+
+          {aiSummary || incident.aiSummary ? (
+            <div className="p-2.5 bg-gray-900/90 rounded-lg border border-gray-800 text-[11px] text-gray-200 leading-relaxed font-sans">
+              {aiSummary || incident.aiSummary}
+            </div>
+          ) : (
+            <button
+              onClick={handleGenerateAiSummary}
+              disabled={isAiLoading}
+              className="w-full py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg transition font-medium text-[11px] flex items-center justify-center gap-1.5 disabled:opacity-50"
+            >
+              <Sparkles className={`w-3.5 h-3.5 text-amber-400 ${isAiLoading ? 'animate-spin' : ''}`} />
+              {isAiLoading ? 'Synthesizing Facts...' : 'Generate AI Operational Summary'}
+            </button>
+          )}
         </div>
 
         {/* 3. Affected Poles Count */}

@@ -65,6 +65,11 @@ export const ApiClient = {
       `/api/incidents/${id}/verify`,
       { method: 'POST' }
     ),
+  explainIncident: (id: string) =>
+    fetchJson<{ summary: string; providerUsed: string; modelUsed?: string; estimatedCostUsd?: number }>(
+      `/api/incidents/${id}/explain`,
+      { method: 'POST' }
+    ),
 
   // Outages & Telemetry
   getOutages: () => fetchJson<ScheduledOutage[]>('/api/outages'),

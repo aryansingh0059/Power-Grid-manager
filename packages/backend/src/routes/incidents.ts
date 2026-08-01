@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { IncidentModel } from '../db/models/Incident';
 import { IncidentService } from '../incidents/IncidentService';
+import { LLMProvider } from '../ai/LLMProvider';
 import type { ApiResponse } from '@pgm/shared';
 
 const incidentsRouter = Router();
@@ -139,6 +140,10 @@ incidentsRouter.post('/:id/resolve', async (req: Request, res: Response) => {
  * POST /api/incidents/:id/verify
  * Triggers telemetry restoration verification.
  */
+/**
+ * POST /api/incidents/:id/verify
+ * Triggers telemetry restoration verification.
+ */
 incidentsRouter.post('/:id/verify', async (req: Request, res: Response) => {
   try {
     const incidentId = req.params.id;
@@ -152,6 +157,37 @@ incidentsRouter.post('/:id/verify', async (req: Request, res: Response) => {
       error: (err as Error).message || 'Failed to verify incident restoration',
     };
     return res.status(400).json(errRes);
+  }
+});
+
+/**
+ * POST /api/incidents/:id/explain
+ * Generates an operator-facing explanation via LLM API or deterministic fallback.
+ */
+incidentsRouter.post('/:id/explain', async (req: Request, res: Response) => {
+  try {
+    const incidentId = req.params.id;
+    const incident = await IncidentModel.findOne({ incidentId });
+
+    if (!incident) {
+      const errRes: ApiResponse<null> = { success: false, error: `Incident ${incidentId} not found` };
+      return res.status(404).json(errRes);
+    }
+
+    const explanation = await LLMProvider.explainIncident(incident);
+
+    // Save summary in incident document
+    incident.aiSummary = explanation.summary;
+    await incident.save();
+
+    const okRes: ApiResponse<typeof explanation> = { success: true, data: explanation };
+    return res.json(okRes);
+  } catch (err: unknown) {
+    const errRes: ApiResponse<null> = {
+      success: false,
+      error: (err as Error).message || 'Failed to generate incident explanation',
+    };
+    return res.status(500).json(errRes);
   }
 });
 
