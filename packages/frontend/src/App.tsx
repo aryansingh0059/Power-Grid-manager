@@ -1,106 +1,166 @@
-import { useState, useEffect } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import type { PoleRecord, Incident } from '@pgm/shared';
+import { ApiClient } from './api/client';
+import { subscribeToRealtimeEvents } from './api/socket';
+import { Header } from './components/Header';
+import { IncidentList } from './components/IncidentList';
+import { GridMap } from './components/GridMap';
+import { IncidentDetail } from './components/IncidentDetail';
+import { SimulatorPanel } from './components/SimulatorPanel';
+import { AlertCircle } from 'lucide-react';
 
-interface HealthData {
-  status: string;
-  db: 'connected' | 'disconnected';
-  timestamp: string;
-  version: string;
-}
+export function App() {
+  const [poles, setPoles] = useState<PoleRecord[]>([]);
+  const [incidents, setIncidents] = useState<Incident[]>([]);
+  const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [isLive] = useState<boolean>(true);
 
-type BackendState = 'loading' | 'ok' | 'error';
+  // Fetch complete grid state from backend
+  const refreshData = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const [fetchedPoles, fetchedIncidents] = await Promise.all([
+        ApiClient.getPoles(),
+        ApiClient.getIncidents(),
+      ]);
 
-function StatusIndicator({ ok, label }: { ok: boolean; label: string }) {
-  return (
-    <div className="flex items-center justify-between py-2 border-b border-gray-800 last:border-0">
-      <span className="text-gray-400 text-sm">{label}</span>
-      <div className="flex items-center gap-2">
-        <span
-          className={`w-2 h-2 rounded-full ${ok ? 'bg-emerald-400' : 'bg-amber-400'} ${
-            ok ? '' : 'animate-pulse'
-          }`}
-        />
-        <span className={`text-sm font-mono ${ok ? 'text-emerald-400' : 'text-amber-400'}`}>
-          {ok ? 'online' : 'offline'}
-        </span>
-      </div>
-    </div>
-  );
-}
+      setPoles(fetchedPoles);
+      setIncidents(fetchedIncidents);
 
-export default function App() {
-  const [health, setHealth] = useState<HealthData | null>(null);
-  const [state, setState] = useState<BackendState>('loading');
+      // Keep current selected incident updated if present
+      if (selectedIncident) {
+        const updated = fetchedIncidents.find((i) => i.incidentId === selectedIncident.incidentId);
+        if (updated) setSelectedIncident(updated);
+      } else if (fetchedIncidents.length > 0) {
+        // Select first active incident by default
+        const active = fetchedIncidents.find((i) => i.status !== 'closed') || fetchedIncidents[0];
+        setSelectedIncident(active);
+      }
+    } catch (err: unknown) {
+      console.error('[App] Failed to load grid data:', err);
+      setError((err as Error).message || 'Failed to connect to backend server');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [selectedIncident]);
 
+  // Initial load
   useEffect(() => {
-    fetch('/api/health')
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json() as Promise<HealthData>;
-      })
-      .then((data) => {
-        setHealth(data);
-        setState('ok');
-      })
-      .catch(() => setState('error'));
+    refreshData();
   }, []);
 
-  const dbConnected = health?.db === 'connected';
+  // Real-time Socket.IO subscriptions
+  useEffect(() => {
+    const unsubscribe = subscribeToRealtimeEvents({
+      onIncidentCreated: (newIncident) => {
+        setIncidents((prev) => [newIncident, ...prev.filter((i) => i.incidentId !== newIncident.incidentId)]);
+        setSelectedIncident(newIncident);
+      },
+      onIncidentUpdated: (updatedIncident) => {
+        setIncidents((prev) =>
+          prev.map((i) => (i.incidentId === updatedIncident.incidentId ? updatedIncident : i))
+        );
+        setSelectedIncident((curr: Incident | null) =>
+          curr?.incidentId === updatedIncident.incidentId ? updatedIncident : curr
+        );
+      },
+      onIncidentVerified: (verifiedIncident) => {
+        setIncidents((prev) =>
+          prev.map((i) => (i.incidentId === verifiedIncident.incidentId ? verifiedIncident : i))
+        );
+      },
+      onNetworkStateChanged: () => {
+        ApiClient.getPoles().then(setPoles).catch(console.error);
+      },
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  // Incident Actions Handlers
+  const handleAcknowledge = async (id: string, note?: string) => {
+    await ApiClient.acknowledgeIncident(id, note);
+    await refreshData();
+  };
+
+  const handleAssignCrew = async (id: string, crewId: string, crewName: string) => {
+    await ApiClient.assignCrew(id, crewId, crewName);
+    await refreshData();
+  };
+
+  const handleResolve = async (id: string, note?: string) => {
+    await ApiClient.resolveIncident(id, note);
+    await refreshData();
+  };
+
+  const handleVerify = async (id: string) => {
+    await ApiClient.verifyRestoration(id);
+    await refreshData();
+  };
 
   return (
-    <div className="min-h-screen bg-gray-950 text-gray-100 flex flex-col">
-      {/* ── Top bar ────────────────────────────────────────────────────────── */}
-      <header className="bg-gray-900/80 backdrop-blur border-b border-gray-800 px-6 py-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="text-amber-400 font-bold text-base tracking-widest uppercase">
-            KSDB
-          </span>
-          <span className="text-gray-700">|</span>
-          <span className="text-gray-300 text-sm">Fault Management Console</span>
-        </div>
+    <div className="flex flex-col h-screen w-screen bg-gray-950 text-gray-100 overflow-hidden font-sans select-none">
+      {/* Header Bar */}
+      <Header
+        incidents={incidents}
+        isLive={isLive}
+        onRefresh={refreshData}
+        isLoading={isLoading}
+      />
 
-        <div className="flex items-center gap-1 text-xs">
-          {state === 'loading' && (
-            <span className="text-gray-500 animate-pulse">Connecting…</span>
-          )}
-          {state === 'error' && (
-            <span className="text-red-400">Backend unreachable</span>
-          )}
-          {state === 'ok' && health && (
-            <span className="text-gray-500">
-              v{health.version} &nbsp;·&nbsp; checked{' '}
-              {new Date(health.timestamp).toLocaleTimeString()}
-            </span>
-          )}
-        </div>
-      </header>
-
-      {/* ── Centre card ────────────────────────────────────────────────────── */}
-      <main className="flex-1 flex items-center justify-center px-4">
-        <div className="w-full max-w-sm space-y-6">
-          <div className="text-center space-y-1">
-            <h1 className="text-2xl font-bold text-amber-400 tracking-tight">
-              Karnataka State Power Distribution Board
-            </h1>
-            <p className="text-gray-500 text-sm">
-              Real-time LT network fault detection &amp; incident management
-            </p>
+      {/* Main Grid Content Area */}
+      <main className="flex-1 flex gap-4 p-4 min-h-0 overflow-hidden">
+        {/* Error Banner */}
+        {error && (
+          <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-red-950 border border-red-700 text-red-200 px-4 py-2 rounded-xl text-xs font-semibold shadow-2xl flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-red-400" />
+            <span>{error}</span>
+            <button
+              onClick={refreshData}
+              className="ml-2 underline text-red-300 hover:text-white"
+            >
+              Retry
+            </button>
           </div>
+        )}
 
-          <div className="bg-gray-900 border border-gray-800 rounded-xl px-6 py-5 space-y-1">
-            <p className="text-gray-600 text-xs uppercase tracking-widest mb-3 font-medium">
-              System Status
-            </p>
+        {/* Column 1: Incident Feed (Left ~340px) */}
+        <section className="w-80 lg:w-96 shrink-0 h-full">
+          <IncidentList
+            incidents={incidents}
+            selectedIncident={selectedIncident}
+            onSelectIncident={setSelectedIncident}
+          />
+        </section>
 
-            <StatusIndicator ok={state !== 'error'} label="Backend API" />
-            <StatusIndicator ok={state === 'ok' && dbConnected} label="Database" />
-            <StatusIndicator ok={true} label="Console" />
-          </div>
+        {/* Column 2: GIS Grid Map (Center Flex-1) */}
+        <section className="flex-1 h-full min-w-[400px]">
+          <GridMap
+            poles={poles}
+            incidents={incidents}
+            selectedIncident={selectedIncident}
+            onSelectIncident={setSelectedIncident}
+          />
+        </section>
 
-          <p className="text-center text-gray-700 text-xs">
-            Operator console and map — available after Task 2
-          </p>
-        </div>
+        {/* Column 3: Incident Details & Action Panel (Right ~380px) */}
+        <section className="w-80 lg:w-96 shrink-0 h-full">
+          <IncidentDetail
+            incident={selectedIncident}
+            onAcknowledge={handleAcknowledge}
+            onAssignCrew={handleAssignCrew}
+            onResolve={handleResolve}
+            onVerify={handleVerify}
+          />
+        </section>
       </main>
+
+      {/* Bottom Simulation Bar */}
+      <SimulatorPanel onRefresh={refreshData} />
     </div>
   );
 }
+export default App;
