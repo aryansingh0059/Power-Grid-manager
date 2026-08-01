@@ -1,5 +1,6 @@
-import type { TopologySource } from '@pgm/shared';
+import type { TopologySource, LocalizationPrecision, PoleRecord } from '@pgm/shared';
 import type { TopologyIndex } from '../topology/TopologyIndex';
+import { TopologyInference, type InferredTopologyResult } from '../topology/TopologyInference';
 import type { LocalizedFault, ConfidenceBreakdown } from './types';
 
 export interface LocalizationInput {
@@ -7,76 +8,57 @@ export interface LocalizationInput {
   /** Map of poleId -> energized state (true = ON, false = OFF, null = no telemetry / silent) */
   poleStateMap: Map<string, boolean | null>;
   dtId?: string; // Optional: restrict to a single DT
+  /** Optional DT location coordinates for topology inference if unrecorded */
+  dtLocationMap?: Map<string, { lat: number; lon: number }>;
 }
 
 /**
  * Pure, deterministic fault localization engine for LT power networks.
  *
- * ## Algorithm Overview
- *
- * 1. Bottom-up Post-Order Pass (Sensor Anomaly Filter):
- *    Computes for every pole P whether ANY pole in P's downstream subtree is confirmed ON.
- *    If P is dark/silent BUT has an energized downstream descendant, P is flagged as a
- *    sensor/device anomaly candidate — power must be flowing through P's span.
- *
- * 2. DT-Level Outage Check:
- *    If all observable poles under a DT are dark and no energized pole exists,
- *    it is classified as a dt_fault (Distribution Transformer failure).
- *
- * 3. Boundary Edge Detection (BFS from root):
- *    Walks tree downward. An edge (Upstream -> Downstream) is a broken span boundary if:
- *      - Upstream pole is ON (or logically ON)
- *      - Downstream pole is OFF (and has no downstream ON poles)
- *    All dark poles in the downstream subtree are grouped into ONE incident.
- *
- * 4. Multi-Fault Isolation:
- *    Independent branch failures produce separate boundary edges and separate incidents.
+ * ## Precision Hierarchy
+ *  - EXACT_SPAN: Verified boundary edge from recorded topology.
+ *  - ESTIMATED_SPAN: Geo-inferred boundary edge with clear geometry.
+ *  - RANGE: Geo-inferred boundary edge with geometric ambiguity.
+ *  - DT_LEVEL: Entire DT outage or topology cannot support span isolation.
  */
 export class LocalizationEngine {
   /**
-   * Run localization on the provided network state.
-   */
-  static localize(input: LocalizationInput): LocalizedFault[] {
-    const { topologyIndex, poleStateMap, dtId } = input;
-
-    // Get target DT IDs
-    const targetDtIds = dtId
-      ? [dtId]
-      : Array.from(new Set(Array.from(topologyIndex.size() ? topologyIndex.getPoleIdsByDt(dtId ?? '') : [])));
-
-    const dtList = targetDtIds.length > 0 ? targetDtIds : LocalizationEngine.extractAllDtIds(topologyIndex);
-
-    const results: LocalizedFault[] = [];
-
-    for (const dId of dtList) {
-      const dtFaults = LocalizationEngine.localizeDt(topologyIndex, poleStateMap, dId);
-      results.push(...dtFaults);
-    }
-
-    return results;
-  }
-
-  private static extractAllDtIds(_topologyIndex: TopologyIndex): string[] {
-    return [];
-  }
-
-  /**
-   * Localize faults for a single Distribution Transformer tree.
+   * Run localization on the provided network state for a single DT or multiple DTs.
    */
   static localizeDt(
     topologyIndex: TopologyIndex,
     poleStateMap: Map<string, boolean | null>,
-    dtId: string
+    dtId: string,
+    dtLocationMap?: Map<string, { lat: number; lon: number }>
   ): LocalizedFault[] {
     const poleIds = topologyIndex.getPoleIdsByDt(dtId);
     if (poleIds.length === 0) return [];
 
+    const poles = poleIds
+      .map((id) => topologyIndex.getPole(id))
+      .filter((p): p is NonNullable<typeof p> => p !== undefined);
+
+    if (poles.length === 0) return [];
+
+    const firstPole = poles[0];
+    const isRecorded = firstPole.topologySource === 'recorded';
+
+    let activeIndex = topologyIndex;
+    let inferenceResult: InferredTopologyResult | null = null;
+    const topologySource: TopologySource = isRecorded ? 'recorded' : 'inferred';
+
+    // Always run inference on unrecorded DTs to get ambiguity metadata & tree structure
+    if (!isRecorded) {
+      const dtLoc = dtLocationMap?.get(dtId) ?? { lat: firstPole.lat, lon: firstPole.lon };
+      inferenceResult = TopologyInference.inferDtTopology(poles, dtLoc.lat, dtLoc.lon);
+      activeIndex = inferenceResult.topologyIndex;
+    }
+
     // Step 1: Compute hasEnergizedDescendant map (bottom-up post-order)
     const hasEnergizedDescendantMap = new Map<string, boolean>();
 
-    // Helper for post-order evaluation
     const computeHasEnergizedDescendant = (pId: string): boolean => {
-      const children = topologyIndex.getChildrenIds(pId);
+      const children = activeIndex.getChildrenIds(pId);
       let childEnergized = false;
 
       for (const childId of children) {
@@ -91,31 +73,28 @@ export class LocalizationEngine {
       return childEnergized;
     };
 
-    const rootIds = topologyIndex.getDtRootIds(dtId);
+    const rootIds = activeIndex.getDtRootIds(dtId);
     for (const rootId of rootIds) {
       computeHasEnergizedDescendant(rootId);
     }
 
     // Step 2: Check for DT-Level Outage
-    // A DT fault occurs if NO pole under the DT is confirmed ON
     const anyPoleOn = poleIds.some((pId) => poleStateMap.get(pId) === true);
     if (!anyPoleOn && rootIds.length > 0) {
-      // Check if root pole itself is reported OFF or missing
       const rootState = poleStateMap.get(rootIds[0]);
       if (rootState === false || rootState === null) {
-        const rootPole = topologyIndex.getPole(rootIds[0]);
-        const feederId = rootPole?.feederId ?? 'UNKNOWN';
-        const pincode = rootPole?.pincode ?? '';
-        const lat = rootPole?.lat ?? 0;
-        const lon = rootPole?.lon ?? 0;
-        const topologySource: TopologySource = rootPole?.topologySource ?? 'unknown';
+        const rootPole = activeIndex.getPole(rootIds[0])!;
+        const feederId = rootPole.feederId;
+        const pincode = rootPole.pincode;
+        const lat = rootPole.lat;
+        const lon = rootPole.lon;
 
         const affectedPoleIds = poleIds;
         const confidenceBreakdown = LocalizationEngine.calculateConfidence(
           topologySource,
           affectedPoleIds,
-          topologyIndex,
-          poleStateMap
+          activeIndex,
+          false
         );
 
         return [
@@ -134,11 +113,13 @@ export class LocalizationEngine {
             reasons: [
               `Distribution Transformer ${dtId} has zero energized poles`,
               `Root pole ${rootIds[0]} reported OFF/silent`,
-              `All ${affectedPoleIds.length} downstream poles unpowered`,
+              `Topology source: ${topologySource}`,
             ],
             confidence: confidenceBreakdown.overallConfidence,
             confidenceBreakdown,
             topologySource,
+            precision: 'DT_LEVEL',
+            isAmbiguous: false,
           },
         ];
       }
@@ -157,11 +138,15 @@ export class LocalizationEngine {
       const currState = poleStateMap.get(currId);
       const currHasEnergizedDescendant = hasEnergizedDescendantMap.get(currId) ?? false;
 
-      // Pole is considered "logically ON" if it is ON or has an energized descendant (sensor anomaly)
-      const isCurrLogicallyOn = currState === true || currHasEnergizedDescendant;
+      // A pole is "logically ON" if:
+      //  - it is confirmed ON (currState === true)
+      //  - OR it has an energized downstream descendant (sensor anomaly)
+      //  - OR it has no device (currState === null) and is reached from an ON upstream parent!
+      const isNoDeviceNoState = currState === null || currState === undefined;
+      const isCurrLogicallyOn = currState === true || currHasEnergizedDescendant || isNoDeviceNoState;
 
       if (isCurrLogicallyOn) {
-        const children = topologyIndex.getChildrenIds(currId);
+        const children = activeIndex.getChildrenIds(currId);
 
         for (const childId of children) {
           const childState = poleStateMap.get(childId);
@@ -171,17 +156,29 @@ export class LocalizationEngine {
             // Live-to-Dark boundary found! Edge: currId -> childId
             const downstreamSubtree = [
               childId,
-              ...topologyIndex.getDescendantIds(childId),
+              ...activeIndex.getDescendantIds(childId),
             ];
 
-            const downstreamPole = topologyIndex.getPole(childId)!;
-            const topologySource: TopologySource = downstreamPole.topologySource ?? 'unknown';
+            const downstreamPole = activeIndex.getPole(childId)!;
+
+            // Check boundary ambiguity for inferred edges
+            const edgeMeta = inferenceResult?.edgeMetadataMap.get(childId);
+            const isAmbiguous = downstreamPole.isAmbiguous ?? edgeMeta?.isAmbiguous ?? false;
+
+            let precision: LocalizationPrecision;
+            if (topologySource === 'recorded') {
+              precision = 'EXACT_SPAN';
+            } else if (isAmbiguous) {
+              precision = 'RANGE';
+            } else {
+              precision = 'ESTIMATED_SPAN';
+            }
 
             const confidenceBreakdown = LocalizationEngine.calculateConfidence(
               topologySource,
               downstreamSubtree,
-              topologyIndex,
-              poleStateMap
+              activeIndex,
+              isAmbiguous
             );
 
             faults.push({
@@ -190,30 +187,37 @@ export class LocalizationEngine {
               dtId: downstreamPole.dtId,
               upstreamPoleId: currId,
               downstreamPoleId: childId,
-              boundaryDescription: `Span fault between ${currId} and ${childId} (${downstreamPole.dtId})`,
+              boundaryDescription:
+                precision === 'EXACT_SPAN'
+                  ? `Exact span fault between ${currId} and ${childId} (${downstreamPole.dtId})`
+                  : precision === 'ESTIMATED_SPAN'
+                  ? `Estimated span fault between ${currId} and ${childId} (${downstreamPole.dtId})`
+                  : `Likely fault range around segment ${currId} - ${childId} (${downstreamPole.dtId})`,
               lat: downstreamPole.lat,
               lon: downstreamPole.lon,
               pincode: downstreamPole.pincode,
               affectedPoleIds: downstreamSubtree,
               affectedPoleCount: downstreamSubtree.length,
               reasons: [
-                `Upstream pole ${currId} confirmed ON`,
+                `Upstream pole ${currId} confirmed ON or power pass-through`,
                 `Downstream pole ${childId} confirmed OFF`,
                 `${downstreamSubtree.length} poles dark in downstream subtree`,
-                `Topology source: ${topologySource}`,
+                `Topology source: ${topologySource} (Precision: ${precision})`,
+                ...(isAmbiguous ? ['Geometric ambiguity detected among candidate parent poles'] : []),
               ],
               confidence: confidenceBreakdown.overallConfidence,
               confidenceBreakdown,
               topologySource,
+              precision,
+              isAmbiguous,
             });
 
-            // Do NOT recurse into childId's subtree since all dark poles are captured by this fault
+            // Do NOT recurse into childId's subtree
             visited.add(childId);
-            for (const descId of topologyIndex.getDescendantIds(childId)) {
+            for (const descId of activeIndex.getDescendantIds(childId)) {
               visited.add(descId);
             }
           } else {
-            // Child is ON or has energized descendants -> continue search deeper
             queue.push(childId);
           }
         }
@@ -230,11 +234,11 @@ export class LocalizationEngine {
     topologySource: TopologySource,
     affectedPoleIds: string[],
     topologyIndex: TopologyIndex,
-    _poleStateMap: Map<string, boolean | null>
+    isAmbiguous: boolean
   ): ConfidenceBreakdown {
     // 1. Topology Score
     const topologyScore =
-      topologySource === 'recorded' ? 1.0 : topologySource === 'inferred' ? 0.6 : 0.3;
+      topologySource === 'recorded' ? 1.0 : isAmbiguous ? 0.4 : 0.65;
 
     // 2. Telemetry Coverage Score
     let polesWithDevice = 0;
@@ -245,8 +249,8 @@ export class LocalizationEngine {
     const telemetryCoverageScore =
       affectedPoleIds.length > 0 ? polesWithDevice / affectedPoleIds.length : 1.0;
 
-    // 3. Sensor Consistency Score (1.0 default for clean boundary)
-    const sensorConsistencyScore = 1.0;
+    // 3. Sensor Consistency Score
+    const sensorConsistencyScore = isAmbiguous ? 0.7 : 1.0;
 
     // Weighted average
     const overallConfidence = Number(

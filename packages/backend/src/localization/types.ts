@@ -1,4 +1,4 @@
-import type { FaultType, TopologySource } from '@pgm/shared';
+import type { FaultType, TopologySource, LocalizationPrecision } from '@pgm/shared';
 
 export interface ConfidenceBreakdown {
   /** 0–1 score for topology certainty ('recorded' = 1.0, 'inferred' = 0.6, 'unknown' = 0.3) */
@@ -27,4 +27,7 @@ export interface LocalizedFault {
   confidence: number;
   confidenceBreakdown: ConfidenceBreakdown;
   topologySource: TopologySource;
+  precision: LocalizationPrecision;
+  /** True if parent-child inference encountered geometric ambiguity */
+  isAmbiguous?: boolean;
 }

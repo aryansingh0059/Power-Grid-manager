@@ -64,6 +64,8 @@ export interface PoleRecord {
   pincode: string;
   deviceId?: string; // ~9% of poles have no device
   topologySource: TopologySource;
+  /** True if parent pole relationship was inferred with geometric ambiguity. */
+  isAmbiguous?: boolean;
   /** Current energisation state; undefined = never received telemetry. */
   energized?: boolean | null;
   /** ISO-8601 of last telemetry event received for this pole. */
@@ -138,6 +140,12 @@ export type FaultType =
   | 'device_anomaly' // sensor/device failure; power likely healthy
   | 'scheduled_outage'; // planned outage window
 
+export type LocalizationPrecision =
+  | 'EXACT_SPAN'
+  | 'ESTIMATED_SPAN'
+  | 'RANGE'
+  | 'DT_LEVEL';
+
 /**
  * The localised fault boundary.
  * For a span fault: the edge P_upstream → P_downstream is broken.
@@ -151,6 +159,7 @@ export interface FaultBoundary {
   /** Human-readable description e.g. "Span between P-024430 and P-024431". */
   description: string;
   topologySource: TopologySource;
+  precision: LocalizationPrecision;
   /** 0–1 confidence in this boundary. Drives UI colour coding. */
   confidence: number;
 }
