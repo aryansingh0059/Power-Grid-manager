@@ -1,5 +1,6 @@
 import { IncidentModel, type IIncident } from '../db/models/Incident';
 import { PoleModel } from '../db/models/Pole';
+import { SocketServer } from '../realtime/SocketServer';
 import type { LocalizedFault } from '../localization/types';
 
 export interface VerificationResult {
@@ -61,6 +62,7 @@ export class IncidentService {
       });
 
       await matchingIncident.save();
+      SocketServer.emitIncidentUpdated(matchingIncident);
       return matchingIncident;
     }
 
@@ -102,6 +104,7 @@ export class IncidentService {
       ],
     });
 
+    SocketServer.emitIncidentCreated(newIncident);
     return newIncident;
   }
 
@@ -130,6 +133,7 @@ export class IncidentService {
     });
 
     await incident.save();
+    SocketServer.emitIncidentUpdated(incident);
     return incident;
   }
 
@@ -159,6 +163,7 @@ export class IncidentService {
     });
 
     await incident.save();
+    SocketServer.emitIncidentUpdated(incident);
     return incident;
   }
 
@@ -181,6 +186,7 @@ export class IncidentService {
     });
 
     await incident.save();
+    SocketServer.emitIncidentUpdated(incident);
 
     // Trigger restoration verification immediately
     await IncidentService.verifyRestoration(incidentId);
@@ -216,6 +222,8 @@ export class IncidentService {
       });
 
       await incident.save();
+      SocketServer.emitIncidentVerified(incident);
+      SocketServer.emitIncidentUpdated(incident);
 
       return {
         verified: true,
@@ -233,6 +241,7 @@ export class IncidentService {
       });
 
       await incident.save();
+      SocketServer.emitIncidentUpdated(incident);
 
       return {
         verified: false,

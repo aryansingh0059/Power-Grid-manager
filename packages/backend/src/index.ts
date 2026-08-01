@@ -1,7 +1,9 @@
 import 'dotenv/config';
+import http from 'http';
 import { app } from './app';
 import { connectDB } from './db/connection';
 import { seedDatabaseIfNeeded } from './db/seed';
+import { SocketServer } from './realtime/SocketServer';
 
 const PORT = Number(process.env.PORT ?? 4000);
 const MONGO_URI = process.env.MONGO_URI ?? 'mongodb://localhost:27017/pgm';
@@ -17,7 +19,10 @@ async function start(): Promise<void> {
     console.warn('[startup] MongoDB unavailable — starting without DB:', (err as Error).message);
   }
 
-  app.listen(PORT, () => {
+  const server = http.createServer(app);
+  SocketServer.init(server);
+
+  server.listen(PORT, () => {
     console.log(`[server] listening on http://localhost:${PORT}`);
   });
 }

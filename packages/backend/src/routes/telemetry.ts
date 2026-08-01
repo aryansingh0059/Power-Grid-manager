@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { validateTelemetryPayload } from '../ingestion/validation';
 import { IngestionService } from '../ingestion/IngestionService';
+import { TelemetryEventModel } from '../db/models/TelemetryEvent';
 import type { ApiResponse } from '@pgm/shared';
 import type { IngestionResult } from '../ingestion/IngestionService';
 
@@ -48,6 +49,37 @@ telemetryRouter.post('/', async (req: Request, res: Response) => {
     const errRes: ApiResponse<null> = {
       success: false,
       error: (err as Error).message || 'Internal telemetry ingestion error',
+    };
+    return res.status(500).json(errRes);
+  }
+});
+
+/**
+ * GET /api/telemetry/recent
+ * Query recent telemetry event history feed.
+ */
+telemetryRouter.get('/recent', async (req: Request, res: Response) => {
+  try {
+    const { deviceId, poleId, event, limit = '50' } = req.query;
+
+    const filter: Record<string, unknown> = {};
+    if (typeof deviceId === 'string' && deviceId) filter.deviceId = deviceId;
+    if (typeof poleId === 'string' && poleId) filter.poleId = poleId;
+    if (typeof event === 'string' && event) filter.event = event;
+
+    const limitNum = Math.min(200, Math.max(1, parseInt(limit as string, 10) || 50));
+
+    const events = await TelemetryEventModel.find(filter)
+      .sort({ receivedAt: -1 })
+      .limit(limitNum)
+      .lean();
+
+    const okRes: ApiResponse<typeof events> = { success: true, data: events };
+    return res.json(okRes);
+  } catch (err: unknown) {
+    const errRes: ApiResponse<null> = {
+      success: false,
+      error: (err as Error).message || 'Failed to query telemetry events',
     };
     return res.status(500).json(errRes);
   }
