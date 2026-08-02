@@ -21,11 +21,11 @@ export const SimulatorPanel: React.FC<SimulatorPanelProps> = ({ onRefresh }) => 
   const [activeTab, setActiveTab] = useState<'span' | 'dt' | 'feeder' | 'device' | 'outage'>('span');
 
   // Input states
-  const [upstreamPole, setUpstreamPole] = useState('P2');
-  const [downstreamPole, setDownstreamPole] = useState('P3');
-  const [dtId, setDtId] = useState('DT1');
-  const [feederId, setFeederId] = useState('F1');
-  const [deviceId, setDeviceId] = useState('DEV-005');
+  const [upstreamPole, setUpstreamPole] = useState('P1');
+  const [downstreamPole, setDownstreamPole] = useState('P2');
+  const [dtId, setDtId] = useState('DT-001');
+  const [feederId, setFeederId] = useState('FDR-01');
+  const [deviceId, setDeviceId] = useState('KSPDB-SD01-D001-1001');
 
   // Noise options
   const [dropPackets, setDropPackets] = useState(false);
@@ -55,12 +55,12 @@ export const SimulatorPanel: React.FC<SimulatorPanelProps> = ({ onRefresh }) => 
   };
 
   const handlePickRecommended = () => {
-    setUpstreamPole('P2');
-    setDownstreamPole('P3');
-    setDtId('DT1');
-    setFeederId('F1');
-    setDeviceId('DEV-005');
-    setFeedbackMessage('Recommended demo targets selected (DT1, Feeder F1, P2->P3)');
+    setUpstreamPole('P1');
+    setDownstreamPole('P2');
+    setDtId('DT-001');
+    setFeederId('FDR-01');
+    setDeviceId('KSPDB-SD01-D001-1001');
+    setFeedbackMessage('Recommended demo targets selected (DT-001, Feeder FDR-01, Span P1->P2)');
   };
 
   return (
@@ -94,39 +94,39 @@ export const SimulatorPanel: React.FC<SimulatorPanelProps> = ({ onRefresh }) => 
         {/* Quick Simulator Buttons */}
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <button
-            onClick={() => runSim('span', () => ApiClient.injectSpanFault('P2', 'P3'))}
+            onClick={() => runSim('span', () => ApiClient.injectSpanFault('P1', 'P2'))}
             disabled={!!loadingAction}
             className="px-3 py-1.5 rounded-xl bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-800/60 font-medium transition flex items-center gap-1.5 disabled:opacity-50"
           >
             <Zap className="w-3.5 h-3.5 text-red-400" />
-            Span Fault (P2→P3)
+            Span Fault (P1→P2)
           </button>
 
           <button
-            onClick={() => runSim('dt', () => ApiClient.injectDtFault('DT1'))}
+            onClick={() => runSim('dt', () => ApiClient.injectDtFault('DT-001'))}
             disabled={!!loadingAction}
             className="px-3 py-1.5 rounded-xl bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 border border-purple-800/60 font-medium transition flex items-center gap-1.5 disabled:opacity-50"
           >
             <AlertTriangle className="w-3.5 h-3.5 text-purple-400" />
-            DT Outage (DT1)
+            DT Outage (DT-001)
           </button>
 
           <button
-            onClick={() => runSim('kill', () => ApiClient.killDevice('DEV-005'))}
+            onClick={() => runSim('kill', () => ApiClient.killDevice('KSPDB-SD01-D001-1001'))}
             disabled={!!loadingAction}
             className="px-3 py-1.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 font-medium transition flex items-center gap-1.5 disabled:opacity-50"
           >
             <ShieldOff className="w-3.5 h-3.5 text-gray-400" />
-            Kill Device (DEV-005)
+            Kill Device
           </button>
 
           <button
-            onClick={() => runSim('repair', () => ApiClient.repairFault('DT1'))}
+            onClick={() => runSim('repair', () => ApiClient.repairFault('DT-001'))}
             disabled={!!loadingAction}
             className="px-3 py-1.5 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-800/60 font-bold transition flex items-center gap-1.5 disabled:opacity-50"
           >
             <Wrench className="w-3.5 h-3.5 text-emerald-400" />
-            Repair & Restore (DT1)
+            Repair & Restore (DT-001)
           </button>
         </div>
 
