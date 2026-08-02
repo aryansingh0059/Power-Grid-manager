@@ -6,7 +6,7 @@
     "declaration": false,
     "baseUrl": ".",
     "paths": {
-      "@pgm/shared": ["../shared/src/index.ts"]
+      "@pgm/shared": ["../shared/dist/index.d.ts"]
     }
   },
   "include": ["src/**/*"],
