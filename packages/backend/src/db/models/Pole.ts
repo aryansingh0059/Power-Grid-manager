@@ -29,7 +29,7 @@ const PoleSchema = new Schema<IPole & Document>(
       required: true,
     },
     ward: { type: String, required: true },
-    pincode: { type: String, required: true },
+    pincode: { type: String, default: '' },
     deviceId: { type: String, default: null, index: true },
     topologySource: {
       type: String,

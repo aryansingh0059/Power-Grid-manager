@@ -141,3 +141,16 @@ The restoration monitor:
 3. Automatically transitions the ticket: `resolved → verified → closed`.
 
 If a ticket is marked `resolved` while poles are still dark, it stays in `resolved` until telemetry confirms restoration.
+
+---
+
+## Performance Benchmarks
+
+For complete empirical benchmark results, methodology, and latency profiles across a 3,000-pole network, see [BENCHMARKS.md](file:///d:/Propel/Power-Grid-Manager/BENCHMARKS.md).
+
+Summary of empirical performance targets:
+- **Telemetry Ingestion Throughput**: ~453–1,250 msgs/sec
+- **Fault Localization Engine (p50)**: < 1.0 ms (0.843 ms observed)
+- **Fault Localization Engine (p95)**: < 3.0 ms (1.699 ms observed)
+- **Restoration Verification Latency**: ~11.47 ms
+- **Incident List REST API Latency**: ~3.50 ms
