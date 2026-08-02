@@ -1,156 +1,173 @@
-# Architecture
+# System Architecture & Technical Specification
 
 ## System Overview
 
-```
-IoT Devices / Simulator
-        │
-        ▼  POST /api/telemetry
-┌─────────────────────────────────────────────────────────┐
-│  Backend  (Node.js · Express · TypeScript)               │
-│                                                          │
-│  ┌──────────────┐   ┌──────────────────────────────┐    │
-│  │  Ingestion   │──▶│  In-process event queue      │    │
-│  │  · dedup     │   │  (Bull or in-memory)          │    │
-│  │  · clock skew│   └────────────┬─────────────────┘    │
-│  └──────────────┘                │                       │
-│                                  ▼                       │
-│  ┌───────────────────────────────────────────────────┐   │
-│  │  Localization Engine  (pure TypeScript, no I/O)   │   │
-│  │  · topology traversal (BFS/DFS on pole tree)      │   │
-│  │  · fault boundary detection                       │   │
-│  │  · device-anomaly classification                  │   │
-│  │  · geo-inference for unknown topology             │   │
-│  └─────────────────────┬─────────────────────────────┘   │
-│                        │                                  │
-│  ┌─────────────────────▼─────────────────────────────┐   │
-│  │  Incident Store  (Mongoose)                        │   │
-│  │  · group dark poles → one incident                │   │
-│  │  · ticket lifecycle state machine                 │   │
-│  │  · restoration monitor                            │   │
-│  └─────────────────────┬─────────────────────────────┘   │
-│                        │                                  │
-│  ┌─────────────────────▼─────────────────────────────┐   │
-│  │  REST API + Socket.IO  (Express routes)            │   │
-│  └───────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
-        │  HTTP + WebSocket
-        ▼
-┌─────────────────────────────────────────────────────────┐
-│  Frontend  (React · Vite · Tailwind · Leaflet)           │
-│  · Incident list  · Map  · Ticket drawer  · Simulator UI │
-└─────────────────────────────────────────────────────────┘
-        │
-        ▼
-   MongoDB (Mongoose)
+Power Grid Manager (PGM) is an IoT fault detection and operational management system built for the **Karnataka State Power Distribution Board (KSDB)**. PGM processes telemetry from ~3,000 poles across 108 Distribution Transformers (DTs) in Bengaluru, performing 100% deterministic fault localization and incident lifecycle tracking.
+
+```mermaid
+graph TD
+    A[IoT Telemetry / Simulator] -->|POST /api/telemetry| B[Telemetry Ingestion Pipeline]
+    B -->|Deduplicate & Validate| C[Ingestion Engine]
+    C -->|Update State & DB| D[(MongoDB Store)]
+    C -->|Trigger Analysis| E[TopologyIndex Graph]
+    E -->|BFS / DFS Traversal| F[LocalizationEngine]
+    F -->|Detect Boundary Edge| G[OutageEvaluator]
+    G -->|Match Scheduled Outages| H[ConfidenceCalculator]
+    H -->|0-100 Score & Reasons| I[IncidentService]
+    I -->|Create / Correlate| D
+    I -->|Emit Live Events| J[Socket.IO Server]
+    J -->|network:state_changed / incident:created| K[React Operator Dashboard]
+    K -->|POST /api/incidents/:id/explain| L[LLMProvider]
+    L -->|OpenAI gpt-4o-mini / Fallback| K
 ```
 
 ---
 
-## Package Responsibilities
+## 1. Telemetry Ingestion Pipeline
 
-### `packages/shared`
+The ingestion pipeline handles raw HTTP telemetry messages sent by IoT devices mounted on physical LT poles.
 
-Pure TypeScript types — no runtime code, no dependencies.  
-Defines: `TelemetryMessage`, `PoleRecord`, `IncidentSummary`, `FaultBoundary`, `TicketStatus`, `HealthResponse`, and related enums.
-
-Both backend and frontend import from this package via npm workspaces.
-
-### `packages/backend`
-
-| Module | Responsibility |
-|---|---|
-| `src/ingestion/` | Accept, deduplicate (`device_id + seq`), and enqueue telemetry messages |
-| `src/topology/` | Load pole registry; walk the tree; build parent→children maps |
-| `src/localization/` | Core fault-localisation algorithm (deterministic, no I/O) |
-| `src/incidents/` | Incident grouping, ticket CRUD, lifecycle state machine |
-| `src/scheduler/` | Compare events against the scheduled-outage mock API |
-| `src/simulator/` | Synthetic network generator; scenario runner |
-| `src/ai/` | Incident narrative generation + deterministic fallback |
-| `src/db/` | Mongoose models and seed script |
-| `src/routes/` | Express route handlers |
-| `src/realtime/` | Socket.IO server; pushes incident updates to the frontend |
-
-### `packages/frontend`
-
-| Component | Responsibility |
-|---|---|
-| `Map/` | Leaflet map; coloured pole markers; incident overlay |
-| `IncidentList/` | Sortable list of active incidents |
-| `TicketDrawer/` | Ticket detail, timeline, status transitions |
-| `Simulator/` | Operator-facing scenario controls |
+### Ingestion Requirements & Rules:
+1. **Deduplication Key**: Messages are indexed by composite key `(device_id, seq)`. Duplicate packets within a 10-minute sliding window are silently dropped (`isDuplicate: true`).
+2. **Boot Sequence Reset**: When an IoT device reboots (hardware reset or power cycle), it emits `event: "boot"` and resets sequence number `seq: 1`. The ingestion engine recognizes boot events, updates `device.bootCount += 1`, and accepts the new sequence stream.
+3. **Stale Message Filtering**: Messages with timestamps older than 90 seconds relative to current server time or out-of-order sequence numbers prior to a boot event are marked `isStale: true` and excluded from state evaluation.
+4. **State Update**: Valid telemetry updates `PoleModel.energized` and `DeviceModel.lastSeenAt`.
 
 ---
 
-## Fault Localisation Logic
+## 2. Storage & Schema Design
 
-### Known topology (recorded `parent_pole_id`)
+Database persistence uses MongoDB with Mongoose schemas:
 
-1. Receive dark-pole events for a DT.
-2. Build the pole tree for that DT from the registry.
-3. Walk the tree from the root (DT breaker) downward.
-4. The **fault boundary** is the edge between the deepest energised pole and the first dark pole.
-5. All poles in the subtree below that edge are grouped into **one incident**.
-6. Confidence: **high** (`topology_source: "recorded"`).
-
-### Unknown topology (missing `parent_pole_id`, ~60% of DTs)
-
-1. Attempt geo-inference: sort poles by `seq_on_line` if available; otherwise infer parent by nearest upstream pole within the same DT using Euclidean distance on lat/lon.
-2. Mark the resulting tree `topology_source: "inferred"`.
-3. Localise as above.
-4. If geo-inference produces ambiguous results (e.g. branching cannot be determined), degrade to **DT-level localisation** — report the fault as "somewhere under DT-xxx" rather than inventing a specific span.
-5. Confidence: **medium** (inferred) or **low** (DT-level).
-
-The UI always displays `topology_source` and `confidence` so operators know what to trust.
-
-### Device anomaly detection
-
-Before raising a power-fault ticket, the engine checks:
-
-- Are any poles **downstream** of the reportedly dark pole **still energised**?  
-  → If yes, the dark report is a **device/sensor anomaly** — no power-fault ticket raised.
+- **`poles`**: Physical grid registry containing `poleId`, `lat`, `lon`, `feederId`, `dtId`, `parentPoleId`, `seqOnLine`, `ward`, `pincode`, `deviceId`, `topologySource`, and mutable runtime field `energized`.
+- **`devices`**: Telemetry sensor registry containing `deviceId`, `poleId`, `firmwareVersion`, `bootCount`, `lastSeq`, and `isOnline`.
+- **`telemetry_events`**: Immutable audit log of ingested telemetry packets.
+- **`incidents`**: Incident records tracking `incidentId`, `faultType`, `status`, `boundary`, `affectedPoleIds`, `confidence`, `confidenceBreakdown`, `timeline`, and `aiSummary`.
+- **`scheduled_outages`**: Maintenance window schedules for 11kV feeders.
 
 ---
 
-## Data Model (key collections)
+## 3. Topology Representation (`TopologyIndex`)
 
-| Collection | Purpose |
-|---|---|
-| `poles` | Registry: all poles, coordinates, device IDs, topology links |
-| `telemetry_events` | Deduplicated ingested messages (ring-buffer or capped collection) |
-| `incidents` | One document per physical fault; holds ticket status, boundary, affected poles |
-| `scheduled_outages` | Mock scheduled-outage windows (feeder or DT level) |
+Grid topology is modeled as an immutable directed acyclic tree graph `TopologyIndex`:
 
----
-
-## Telemetry Deduplication
-
-Primary key: `(device_id, seq)`.  
-After a device `boot` event, `seq` resets. The engine treats a post-boot sequence as a new series (detected via seq drop > threshold or explicit `boot` event).  
-Clock skew (±90 s) is tolerated by using `seq` for ordering and `ts` only for display.
+- **Tree Node Structure**: Each pole is a node in a radial tree rooted at the Distribution Transformer (`DT_ROOT`).
+- **Parent-Child Vectors**: Each node stores `parentPoleId` and `childrenPoleIds[]`.
+- **Precomputed Subtrees**: For any pole node `N`, `getSubtreePoleIds(N)` returns the set of all downstream descendant poles in $O(1)$ time.
 
 ---
 
-## Restoration Verification
+## 4. Known vs Inferred Topology Strategy
 
-A ticket can only reach `verified` via telemetry — it cannot be manually jumped there.  
-The restoration monitor:
+The KSDB network contains both complete recorded topology and missing topology records (~60% of DTs):
 
-1. Watches for `power_restored` events on poles belonging to open incidents.
-2. Waits until **all affected poles** report restored (or are confirmed by heartbeat).
-3. Automatically transitions the ticket: `resolved → verified → closed`.
-
-If a ticket is marked `resolved` while poles are still dark, it stays in `resolved` until telemetry confirms restoration.
+- **Recorded Topology (`EXACT_SPAN`)**: `topologySource: "recorded"`. Parent-child links exist in official department records. Localization pinpointing is exact to span `P2 → P3`.
+- **Inferred Topology (`ESTIMATED_SPAN` / `RANGE` / `DT_LEVEL`)**: `topologySource: "inferred"`. For DTs with missing topology records, PGM applies a Minimum Spanning Tree (MST) geo-proximity algorithm using Euclidean distances and line sequence hints to reconstruct parent-child links. If distance ambiguity exceeds 15%, precision degrades to `RANGE` or `DT_LEVEL` with lower confidence.
 
 ---
 
-## Performance Benchmarks
+## 5. Deterministic Fault Localization Algorithm
 
-For complete empirical benchmark results, methodology, and latency profiles across a 3,000-pole network, see [BENCHMARKS.md](file:///d:/Propel/Power-Grid-Manager/BENCHMARKS.md).
+The `LocalizationEngine` executes a deterministic BFS/DFS graph traversal without AI:
 
-Summary of empirical performance targets:
-- **Telemetry Ingestion Throughput**: ~453–1,250 msgs/sec
-- **Fault Localization Engine (p50)**: < 1.0 ms (0.843 ms observed)
-- **Fault Localization Engine (p95)**: < 3.0 ms (1.699 ms observed)
-- **Restoration Verification Latency**: ~11.47 ms
-- **Incident List REST API Latency**: ~3.50 ms
+1. **Root Status Check**: Evaluate root pole (directly attached to DT breaker). If root is dark and 100% of DT poles are dark, classify as `dt_fault`.
+2. **Top-Down Tree Traversal**: For span faults, walk tree from root downward:
+   - Identify candidate edges `(U, V)` where upstream pole `U` is `ENERGIZED` and downstream pole `V` is `DE_ENERGIZED`.
+3. **Downstream Grouping**: Group all dark descendant poles in `getSubtreePoleIds(V)` into a **single incident ticket** to prevent duplicate tickets for the same physical line break.
+4. **Multiple Simultaneous Independent Faults**: If two parallel independent branches under the same DT suffer line breaks simultaneously, the engine isolates two separate boundary edges `(U1, V1)` and `(U2, V2)` and generates two separate correlated incidents.
+
+---
+
+## 6. Sensor Failure & False-Positive Strategy (`device_anomaly`)
+
+Hardware sensor failure (e.g. blown fuse on IoT device board) can cause a single device to report `DE_ENERGIZED` while physical power remains healthy.
+
+- **Post-Order Check Rule**: Before raising a line-fault ticket for dark pole `P`, inspect all downstream child poles of `P`.
+- **Anomaly Filter**: If any downstream descendant pole is `ENERGIZED: true`, physical power MUST be flowing through `P`. Therefore, `P`'s report is classified as `device_anomaly`. **NO outage ticket is generated**.
+
+---
+
+## 7. Scheduled Outage Conflict Evaluation
+
+When an outage is detected on a feeder, `OutageEvaluator` matches the event against active feeder maintenance windows in `scheduled_outages`.
+
+- **Evidence-Based Matching**: If an active scheduled outage window covers `feederId`, the fault type is classified as `scheduled_outage`.
+- **Non-Ticket Suppression**: Rather than raising a urgent fault ticket, PGM marks the incident as a scheduled load-shedding event, preventing false dispatch of emergency repair crews.
+
+---
+
+## 8. Explainable 7-Factor Confidence Model (0–100)
+
+Confidence scores are computed deterministically by `ConfidenceCalculator` using 7 explicit factors:
+
+1. **Topology Source (+40% recorded / +26% inferred)**
+2. **Upstream Live Pole Confirmation (+25%)**
+3. **Downstream Dark Pole Confirmation (+20%)**
+4. **Subtree Telemetry Consistency (+15%)**
+5. **Firmware 1.2.x Limitations (-10% penalty for silent devices)**
+6. **Missing Sensor Proximity (-10% penalty)**
+7. **Scheduled Outage Conflict (-15% penalty)**
+
+Returns both numerical `score` (e.g. `95`) and human-readable `reasons[]` array displayed in the UI.
+
+---
+
+## 9. Algorithmic Complexity
+
+- **Time Complexity**: $O(V + E)$ where $V$ is number of poles (~3,000) and $E$ is number of line spans. BFS/DFS traversal runs in under 1.0 ms.
+- **Space Complexity**: $O(V)$ space to store `TopologyIndex` parent-child lookup maps.
+
+---
+
+## 10. Operator UI Design & Incident Workflow
+
+Built with React, TypeScript, Leaflet GIS, and Socket.IO real-time events.
+
+### Ticket Lifecycle State Machine:
+`DETECTED` $\rightarrow$ `ACKNOWLEDGED` $\rightarrow$ `CREW_ASSIGNED` $\rightarrow$ `RESOLVED` $\rightarrow$ `VERIFIED` $\rightarrow$ `CLOSED`
+
+- **Mandatory Unverified Restoration Rule**: Marking a ticket `RESOLVED` indicates field crew repair completion. It does NOT imply power restoration. If poles remain dark, UI displays:  
+  *`⚠️ Repair reported, but restoration has not been verified from telemetry.`*
+- **Automated Verification**: Ingestion of restoration telemetry (`boot` + `power_restored`) automatically verifies 100% downstream pole state and transitions `RESOLVED` $\rightarrow$ `VERIFIED` $\rightarrow$ `CLOSED` over Socket.IO.
+
+---
+
+## 11. AI Feature & Deterministic Fallback (`LLMProvider`)
+
+- **Feature**: `"Explain Incident"` (`POST /api/incidents/:id/explain`).
+- **Input**: Structured incident facts extracted by backend (`incidentId`, `faultType`, `boundary`, `affectedPoleCount`, `confidence`, `reasons`, `pincode`).
+- **Strict Rules**: AI NEVER determines fault location, NEVER alters confidence, and NEVER mutates ticket state. API keys exist strictly in backend env.
+- **Deterministic Fallback**: If `OPENAI_API_KEY` is missing or LLM call fails/times out (5s limit), system seamlessly returns a structured template summary. System is 100% functional without an AI key.
+
+---
+
+## 12. Complete API Surface
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/health` | GET | System health summary & Mongo connection status |
+| `/api/network/poles` | GET | Grid poles & DT topology for Leaflet GIS map |
+| `/api/incidents` | GET | List active/historical incident tickets |
+| `/api/incidents/:id` | GET | Single incident detail with complete timeline |
+| `/api/incidents/:id/acknowledge` | POST | Operator acknowledges incident ticket |
+| `/api/incidents/:id/assign-crew` | POST | Assign field repair crew |
+| `/api/incidents/:id/resolve` | POST | Mark repair complete (unverified state) |
+| `/api/incidents/:id/verify` | POST | Trigger telemetry restoration verification |
+| `/api/incidents/:id/explain` | POST | Generate AI operational summary / fallback |
+| `/api/simulator/inject-span` | POST | Simulator: Inject span fault |
+| `/api/simulator/inject-dt` | POST | Simulator: Inject Distribution Transformer fault |
+| `/api/simulator/inject-feeder` | POST | Simulator: Inject 11kV Feeder fault |
+| `/api/simulator/kill-device` | POST | Simulator: Silence hardware device |
+| `/api/simulator/repair` | POST | Simulator: Repair fault & restore grid power |
+
+---
+
+## 13. Performance Measurements
+
+For full empirical benchmark methodology and test suite details, see [BENCHMARKS.md](file:///d:/Propel/Power-Grid-Manager/BENCHMARKS.md).
+
+- **Ingestion Throughput**: ~453 msgs/sec (DB writes) / ~1,250 msgs/sec (in-memory)
+- **Fault Localization Latency (p50)**: **0.843 ms**
+- **Fault Localization Latency (p95)**: **1.699 ms**
+- **Restoration Telemetry Verification**: **11.47 ms**
+- **Incident List REST API Response**: **3.50 ms**

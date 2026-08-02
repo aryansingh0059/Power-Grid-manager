@@ -1,95 +1,99 @@
-# Architecture Decision Records
+# Architecture Decision Records (ADRs) & Engineering Tradeoffs
+
+This document records architectural decisions in reverse chronological order (newest first), detailing the context, options considered, decisions made, tradeoffs accepted, and future roadmap.
 
 ---
 
-## ADR-001 — npm workspaces monorepo (no Turborepo/Lerna)
+## 1. AI Placement & Strict Boundary Architecture
 
-**Status:** Accepted
-
-**Context:** A monorepo is needed for frontend + backend + shared types. Several build orchestration tools exist (Turborepo, Nx, Lerna).
-
-**Decision:** Use npm workspaces only. No additional build orchestration layer.
-
-**Rationale:** npm workspaces give us symlinked packages and workspace-aware `npm run` commands with no extra tooling. Turborepo's caching is valuable at scale but adds a dependency and conceptual overhead that does not pay off at this project size. The build is simple enough (`build shared → build backend → build frontend`) that a shell sequence in the root `package.json` is sufficient and readable.
-
----
-
-## ADR-002 — Vitest for backend tests (not Jest)
-
-**Status:** Accepted
-
-**Context:** Need a TypeScript-capable test runner for the backend.
-
-**Decision:** Vitest.
-
-**Rationale:** Vitest has native TypeScript support via its built-in transformer (no `ts-jest` config needed), is compatible with the Jest assertion API, and starts faster. For a Node.js backend with no browser-specific code, Vitest is straightforward. If the project had existed on Jest, we would have stayed with Jest.
+- **Date**: 2026-08-01
+- **Decision**: Restrict AI (LLM) strictly to generating concise natural-language operational summaries (`POST /api/incidents/:id/explain`) from structured facts extracted by backend.
+- **Alternatives Considered**:
+  - Using LLM for fault localization or boundary prediction.
+  - Exposing OpenAI API key directly to frontend browser.
+- **Reasoning**: Fault localization requires 100% deterministic graph logic. An LLM can hallucinate false topology boundaries, leading to incorrect field crew dispatch. Restricting LLM to narrative synthesis guarantees mathematical correctness.
+- **Tradeoffs**: Narrative text cannot invent new diagnostic insights beyond facts provided in the input prompt.
+- **Deterministic Fallback**: If `OPENAI_API_KEY` is missing or LLM call fails/times out (5s limit), system seamlessly returns a structured template summary.
 
 ---
 
-## ADR-003 — In-process event queue (no Redis/BullMQ in Task 1)
+## 2. Real-Time Transport: Socket.IO WebSockets vs Polling
 
-**Status:** Pending revision
-
-**Context:** Telemetry ingestion needs a queue to absorb bursts (5,000 msg/10 s) and decouple ingestion from localisation.
-
-**Decision (current):** Start with an in-process async queue. Add Redis/BullMQ only if benchmarks show it is needed.
-
-**Rationale:** Redis is an additional infrastructure component. The performance target (≥500 msg/s sustained) should be achievable in-process on a single Node.js instance. We will benchmark in Task 3 (ingestion) before adding infrastructure. If horizontal scaling becomes a requirement, BullMQ with Redis is a drop-in replacement.
-
-**Risk:** If the process restarts, queued-but-unprocessed messages are lost. Mitigated by at-least-once delivery from devices (they will retry).
+- **Date**: 2026-08-01
+- **Decision**: Use Socket.IO for server-sent real-time updates (`incident:created`, `incident:updated`, `network:state_changed`).
+- **Alternatives Considered**: HTTP Long-Polling, Server-Sent Events (SSE).
+- **Reasoning**: Control-room operators working under high pressure require instantaneous feedback when physical outages occur or field repairs are verified. Socket.IO provides automatic reconnection, fallback polling, and rooms out of the box.
+- **Tradeoffs**: Slightly higher memory overhead per connected client compared to stateless HTTP polling.
 
 ---
 
-## ADR-004 — Shared types imported via relative path in dev, workspace in production
+## 3. Explainable 7-Factor Confidence Scoring Model (0–100)
 
-**Status:** Accepted
-
-**Context:** The shared package needs to be compiled before backend/frontend can import from it. During dev, `ts-node-dev` transpiles TypeScript directly, so compiled JS is not needed.
-
-**Decision:** `health.ts` imports shared types with a direct relative path (`../../shared/src/index`) for dev. The shared package is built before backend in the Docker image. In a future task, once the workspace import chain is fully established, this will be replaced with `@pgm/shared` and `tsconfig-paths`.
-
-**Note:** This is a pragmatic shortcut for Task 1. It is documented here so it is not forgotten.
+- **Date**: 2026-08-01
+- **Decision**: Implement a transparent, deterministic 7-factor scoring model that returns both numerical score (`0–100`) and human-readable reasons (`confidenceReasons[]`).
+- **Alternatives Considered**: Opaque machine learning probability outputs or arbitrary percentage heuristics.
+- **Reasoning**: Control-room operators must understand *why* confidence is high or low (e.g. recorded topology vs MST inference vs silent devices).
+- **Tradeoffs**: Weightings (e.g. +40% recorded, +25% upstream live) are fixed domain heuristics requiring manual tuning if network topology characteristics change.
 
 ---
 
-## ADR-005 — Fault localisation is deterministic (no ML/LLM)
+## 4. Missing Topology Strategy: MST Geo-Distance Inference
 
-**Status:** Accepted
-
-**Context:** Fault localisation requires correctness, explainability, and offline operation.
-
-**Decision:** All fault localisation, confidence scoring, device-anomaly detection, and restoration verification are implemented as deterministic TypeScript functions with no external dependencies.
-
-**Rationale:** A model that produces a "probably a span fault" with no explanation is not acceptable in a safety-adjacent operational tool. Deterministic algorithms are testable, explainable, and do not depend on API availability. An LLM is used only for human-readable narrative summaries, not for any decision that affects ticket creation or classification.
+- **Date**: 2026-08-01
+- **Decision**: Reconstruct missing parent-child topology links (~60% of DTs) using Euclidean distance MST and line sequence hints, while degrading precision (`EXACT_SPAN` $\rightarrow$ `ESTIMATED_SPAN` $\rightarrow$ `RANGE` $\rightarrow$ `DT_LEVEL`).
+- **Alternatives Considered**: Rejecting telemetry from DTs with missing topology records or silently assuming complete topology.
+- **Reasoning**: Real-world power grids contain incomplete GIS records. The localization engine must remain functional under partial topology.
+- **Tradeoffs**: Inferred tree paths may misattribute parentage if physical lines loop around obstacles or follow non-Euclidean road paths.
 
 ---
 
-## ADR-006 — Unknown topology is a first-class condition
+## 5. Radial Tree Graph Representation (`TopologyIndex`)
 
-**Status:** Accepted
-
-**Context:** ~60% of DTs are missing `parent_pole_id` and `seq_on_line`.
-
-**Decision:** The system has two explicit code paths: `recorded` topology and `inferred` topology. A third path (`dt_level`) is used when inference is not confident enough to name a specific span. The UI always shows `topology_source` and `confidence`. No path silently presents inferred data as recorded data.
-
----
-
-## ADR-007 — Backend starts even if MongoDB is unavailable
-
-**Status:** Accepted
-
-**Context:** In Docker, MongoDB may not be ready when the backend container starts despite the `depends_on: condition: service_healthy` guard.
-
-**Decision:** The backend catches the initial connection error, logs a warning, and starts the HTTP server anyway. The health endpoint reports `db: "disconnected"`. Mongoose retries the connection automatically. This prevents a hard crash loop and makes the system observable during startup.
+- **Date**: 2026-08-01
+- **Decision**: Represent physical distribution grid as an immutable directed acyclic tree `TopologyIndex` rooted at Distribution Transformers (`DT_ROOT`).
+- **Alternatives Considered**: Full mesh cyclic graph representation or ad-hoc SQL joins.
+- **Reasoning**: Low-tension (LT) distribution networks operate physically as radial trees. Tree properties allow $O(V + E)$ BFS/DFS traversal and $O(1)$ subtree pole set lookups.
+- **Tradeoffs**: Ring-main feeders or dual-fed tie switches would require dynamic graph cycle breaking.
 
 ---
 
-## ADR-008 — Single nginx container for the frontend
+## 6. Database Selection: MongoDB with Mongoose
 
-**Status:** Accepted
+- **Date**: 2026-08-01
+- **Decision**: Use MongoDB 7 as the primary datastore for poles, telemetry events, incidents, and devices.
+- **Alternatives Considered**: PostgreSQL with PostGIS.
+- **Reasoning**: Telemetry event ingestion and incident timeline audit arrays benefit from MongoDB's flexible document schema and indexed array queries.
+- **Tradeoffs**: Lack of multi-table ACID transactions across collections requires careful atomic document updates (`updateOne`).
 
-**Context:** The compiled React app is a static bundle.
+---
 
-**Decision:** Serve it from `nginx:alpine`. The nginx config reverse-proxies `/api/*` to the backend, mirroring the Vite dev proxy. No Node.js in the production frontend container.
+## 7. Technology Stack Selection: TypeScript Monorepo
 
-**Rationale:** Simpler, smaller image, and separates concerns cleanly.
+- **Date**: 2026-08-01
+- **Decision**: Build monorepo using npm workspaces (`@pgm/shared`, `@pgm/backend`, `@pgm/frontend`).
+- **Alternatives Considered**: Separate independent repositories or Python backend.
+- **Reasoning**: End-to-end TypeScript provides complete type safety across API request/response payloads, domain models, and Socket.IO events.
+
+---
+
+## 8. What Was Intentionally Excluded
+
+1. **User Authentication & Role-Based Access Control (RBAC)**: Excluded to keep demo startup frictionless.
+2. **Complex Multi-Layer GIS Maps**: Standard Leaflet OSM tile layer with high-performance canvas markers selected instead of heavy ArcGIS servers.
+3. **Heavy Message Queues (Kafka / RabbitMQ)**: In-process event handling selected for lightweight single-node deployment simplicity.
+
+---
+
+## 9. What I Would Do With Two More Weeks
+
+1. **Advanced Geo-Spatial Road Routing**: Integrate OSRM or OpenStreetMap road segment data into topology inference so MST links follow physical roads rather than straight Euclidean lines.
+2. **Redis Ingestion Queue & Caching**: Add Redis stream processing for telemetry ingestion to scale burst throughput beyond `10,000 msgs/sec`.
+3. **Historical Heatmaps & Predictive Maintenance**: Add geospatial heatmap overlays of historical line fault frequency to identify aging conductor spans before failure.
+
+---
+
+## 10. Known Weaknesses & Fragile Areas
+
+1. **Ring-Main / Mesh Tie Switches**: Currently assumes strict radial tree structure. Dual-fed tie switches would require active loop-breaking logic.
+2. **Euclidean Distance Inference**: Inferred topology assumes poles close in Euclidean space are connected, which can fail across wide rivers or highway dividers.
+3. **Single-Node Ingestion Concurrency**: Heavy concurrent telemetry bursts (>2,000 msgs/sec) on a single Node.js thread can experience Mongoose write lock contention.
