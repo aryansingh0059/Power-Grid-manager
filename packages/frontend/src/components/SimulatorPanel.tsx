@@ -66,7 +66,7 @@ export const SimulatorPanel: React.FC<SimulatorPanelProps> = ({ onRefresh }) => 
   return (
     <>
       {/* Bottom Quick-Action Bar */}
-      <div className="bg-gray-900/95 border-t border-gray-800 backdrop-blur-md px-6 py-2.5 flex flex-wrap items-center justify-between gap-4 z-20">
+      <div className="bg-gray-900/95 border-t border-gray-800 backdrop-blur-md px-6 py-2.5 flex flex-wrap items-center justify-between gap-4 z-40 shrink-0">
         {/* Label & Modal Opener */}
         <div className="flex items-center gap-3">
           <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400">
@@ -140,7 +140,7 @@ export const SimulatorPanel: React.FC<SimulatorPanelProps> = ({ onRefresh }) => 
 
       {/* Expanded Reviewer Studio Drawer / Modal */}
       {isDrawerOpen && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-md flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-gray-900 border border-gray-800 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             {/* Modal Header */}
             <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-950/80">
