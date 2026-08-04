@@ -210,23 +210,6 @@ export interface Incident {
   scheduledOutageId?: string;
 }
 
-/** Lightweight incident record for list views. */
-export interface IncidentSummary {
-  incidentId: string;
-  faultType: FaultType;
-  status: TicketStatus;
-  feederId: string;
-  dtId: string;
-  affectedPoleCount: number;
-  boundary: FaultBoundary;
-  pincode: string;
-  lat: number;
-  lon: number;
-  detectedAt: string;
-  resolvedAt?: string;
-  verifiedAt?: string;
-}
-
 // ─── API wrappers ─────────────────────────────────────────────────────────────
 
 export interface ApiResponse<T> {

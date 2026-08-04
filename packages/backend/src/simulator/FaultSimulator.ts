@@ -126,7 +126,7 @@ export class FaultSimulator {
       ...topologyIndex.getDescendantIds(downstreamPoleId),
     ];
 
-    const deterministic = options.deterministic ?? true; // Default true for reliable demo
+    const deterministic = options.deterministic ?? true;
     const dropRate = options.dropRate ?? 0.3;
 
     // Update physical state of affected poles in DB
@@ -140,13 +140,8 @@ export class FaultSimulator {
 
     for (const dev of devices) {
       const isFw12 = dev.firmwareVersion.startsWith('1.2.');
-      if (isFw12) {
-        continue;
-      }
-
-      if (!deterministic && Math.random() < dropRate) {
-        continue;
-      }
+      if (isFw12) continue;
+      if (!deterministic && Math.random() < dropRate) continue;
 
       const msg: TelemetryMessage = {
         device_id: dev.deviceId,
@@ -162,7 +157,6 @@ export class FaultSimulator {
       telemetryCount++;
     }
 
-    // Automatically trigger localization engine pipeline to detect and ticket fault
     const incidentsCreated = await FaultSimulator.runLocalizationPipeline();
 
     return {
@@ -308,25 +302,34 @@ export class FaultSimulator {
   }
 
   /**
-   * Repair an active fault, restoring physical power and emitting boot/power_restored telemetry.
+   * Repair active faults, restoring physical power and emitting boot/power_restored telemetry.
+   * Smartly restores ALL dark poles across the network if no specific target is provided.
    */
   static async repairFault(
     dtInput?: string,
     downstreamPoleId?: string
   ): Promise<SimulationResult> {
-    const dtId = await FaultSimulator.resolveDt(dtInput || 'DT-001');
-    const allPoles = await PoleModel.find({ dtId }).lean();
-    const topologyIndex = TopologyIndex.build(allPoles as PoleRecord[]);
-
     let targetPoleIds: string[] = [];
 
     if (downstreamPoleId) {
+      const dtId = await FaultSimulator.resolveDt(dtInput || 'DT-001');
+      const allPoles = await PoleModel.find({ dtId }).lean();
+      const topologyIndex = TopologyIndex.build(allPoles as PoleRecord[]);
       targetPoleIds = [
         downstreamPoleId,
         ...topologyIndex.getDescendantIds(downstreamPoleId),
       ];
     } else {
-      targetPoleIds = allPoles.map((p) => p.poleId);
+      // Find all dark poles currently in the database
+      const darkPoles = await PoleModel.find({ energized: false }).lean();
+      targetPoleIds = darkPoles.map((p) => p.poleId);
+
+      // Fallback: if no dark poles found, target DT-001 poles
+      if (targetPoleIds.length === 0) {
+        const dtId = await FaultSimulator.resolveDt(dtInput || 'DT-001');
+        const dtPoles = await PoleModel.find({ dtId }).lean();
+        targetPoleIds = dtPoles.map((p) => p.poleId);
+      }
     }
 
     const now = new Date();
@@ -367,6 +370,7 @@ export class FaultSimulator {
       telemetryCount += 2;
     }
 
+    // Trigger restoration verification check across all active tickets
     const closedCount = await IncidentService.checkAllActiveIncidentsForRestoration();
 
     return {
@@ -375,7 +379,7 @@ export class FaultSimulator {
       affectedPoleCount: targetPoleIds.length,
       affectedDeviceCount: devices.length,
       telemetryEmittedCount: telemetryCount,
-      message: `Repaired fault on DT ${dtId} (${targetPoleIds.length} poles re-energized, ${telemetryCount} restoration events emitted, ${closedCount} incidents auto-closed).`,
+      message: `Repaired physical grid faults (${targetPoleIds.length} poles re-energized, ${telemetryCount} restoration events emitted, ${closedCount} incidents auto-closed).`,
     };
   }
 
@@ -445,7 +449,7 @@ export class FaultSimulator {
       );
 
       for (const fault of detectedFaults) {
-        if (fault.faultType === 'device_anomaly') continue; // Do not ticket sensor anomalies
+        if (fault.faultType === 'device_anomaly') continue;
         await IncidentService.createOrCorrelateIncident(fault);
         createdCount++;
       }

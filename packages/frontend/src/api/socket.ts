@@ -8,7 +8,9 @@ export function getSocket(): Socket {
     const socketUrl = import.meta.env.VITE_API_BASE_URL || window.location.origin;
     socket = io(socketUrl, {
       autoConnect: true,
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
+      reconnectionAttempts: 5,
+      reconnectionDelay: 1000,
     });
   }
   return socket;

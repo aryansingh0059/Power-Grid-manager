@@ -123,7 +123,6 @@ describe('Performance Benchmarks & Target Verification', () => {
       affectedPoleCount: activePoles.length,
       reasons: ['P1 ON', 'P2 OFF'],
       confidence: 95,
-      confidenceBreakdown: { topologyScore: 1, telemetryCoverageScore: 1, sensorConsistencyScore: 1, overallConfidence: 0.95 },
       topologySource: 'recorded',
       precision: 'EXACT_SPAN',
     });

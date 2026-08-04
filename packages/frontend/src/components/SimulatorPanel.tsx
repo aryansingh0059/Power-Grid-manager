@@ -27,9 +27,6 @@ export const SimulatorPanel: React.FC<SimulatorPanelProps> = ({ onRefresh }) => 
   const [feederId, setFeederId] = useState('FDR-01');
   const [deviceId, setDeviceId] = useState('KSPDB-SD01-D001-1001');
 
-  // Noise options
-  const [dropPackets, setDropPackets] = useState(false);
-
   const [loadingAction, setLoadingAction] = useState<string | null>(null);
   const [feedbackMessage, setFeedbackMessage] = useState<string | null>(null);
   const [activeFaults, setActiveFaults] = useState<string[]>([]);
@@ -371,23 +368,6 @@ export const SimulatorPanel: React.FC<SimulatorPanelProps> = ({ onRefresh }) => 
                   </button>
                 </div>
               )}
-
-              {/* Telemetry Noise Toggles */}
-              <div className="bg-gray-950 p-3 rounded-xl border border-gray-800 space-y-2">
-                <div className="text-[10px] text-gray-400 uppercase font-mono font-semibold">
-                  Optional Telemetry Noise Toggles
-                </div>
-
-                <label className="flex items-center gap-2 cursor-pointer text-gray-300 font-mono">
-                  <input
-                    type="checkbox"
-                    checked={dropPackets}
-                    onChange={(e) => setDropPackets(e.target.checked)}
-                    className="rounded bg-gray-900 border-gray-700"
-                  />
-                  <span>Simulate 30% dying packet loss (non-deterministic mode)</span>
-                </label>
-              </div>
 
               {/* Global Repair Controls */}
               <div className="pt-2 border-t border-gray-800 flex items-center justify-between">

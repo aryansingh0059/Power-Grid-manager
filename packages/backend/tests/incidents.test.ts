@@ -36,7 +36,6 @@ describe('Incident & Ticket Workflow Lifecycle', () => {
     affectedPoleCount: 3,
     reasons: ['Upstream P1 ON', 'Downstream P2 OFF'],
     confidence: 95,
-    confidenceBreakdown: { topologyScore: 1, telemetryCoverageScore: 1, sensorConsistencyScore: 1, overallConfidence: 0.95 },
     topologySource: 'recorded',
     precision: 'EXACT_SPAN',
   };

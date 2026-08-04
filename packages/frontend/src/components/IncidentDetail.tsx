@@ -102,7 +102,12 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
     setActionLoading(true);
     setActionError(null);
     try {
-      await onVerify(incident.incidentId);
+      const res = await ApiClient.verifyRestoration(incident.incidentId);
+      if (!res.verified) {
+        setActionError(`⚠️ Telemetry verification pending: ${res.darkPoleCount} of ${incident.affectedPoleIds?.length || 0} affected poles remain de-energized. Use 'Repair & Restore' in simulator first.`);
+      } else {
+        await onVerify(incident.incidentId);
+      }
     } catch (err: unknown) {
       setActionError((err as Error).message);
     } finally {
@@ -212,7 +217,7 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
             <div className="flex items-center gap-1.5 text-gray-300 font-mono">
               <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
               <span>
-                {incident.lat.toFixed(4)}, {incident.lon.toFixed(4)}
+                {incident.lat.toFixed(6)}, {incident.lon.toFixed(6)}
               </span>
             </div>
 
@@ -301,25 +306,42 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
           )}
         </div>
 
-        {/* 3. Affected Poles Count */}
-        <div className="bg-gray-950/80 p-3 rounded-xl border border-gray-800/80">
-          <div className="flex items-center justify-between mb-2">
+        {/* 3. Affected / Restored Poles Section */}
+        <div className="bg-gray-950/80 p-3 rounded-xl border border-gray-800/80 space-y-2">
+          <div className="flex items-center justify-between">
             <span className="text-[10px] text-gray-400 uppercase font-mono font-semibold">
-              Affected Dark Poles ({incident.affectedPoleIds?.length || 0})
+              {['closed', 'verified'].includes(incident.status)
+                ? `Restored Energized Poles (${incident.affectedPoleIds?.length || 0})`
+                : `Affected Dark Poles (${incident.affectedPoleIds?.length || 0})`}
             </span>
-            <Zap className="w-4 h-4 text-purple-400" />
+            {['closed', 'verified'].includes(incident.status) ? (
+              <CheckCircle className="w-4 h-4 text-emerald-400" />
+            ) : (
+              <Zap className="w-4 h-4 text-purple-400" />
+            )}
           </div>
 
           <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
             {incident.affectedPoleIds?.map((pId: string) => (
               <span
                 key={pId}
-                className="px-2 py-0.5 bg-purple-950/40 border border-purple-800/30 text-purple-300 rounded text-[10px] font-mono"
+                className={`px-2 py-0.5 rounded text-[10px] font-mono ${
+                  ['closed', 'verified'].includes(incident.status)
+                    ? 'bg-emerald-950/40 border border-emerald-800/30 text-emerald-300'
+                    : 'bg-purple-950/40 border border-purple-800/30 text-purple-300'
+                }`}
               >
                 {pId}
               </span>
             ))}
           </div>
+
+          {['closed', 'verified'].includes(incident.status) && (
+            <div className="p-2 bg-emerald-950/40 border border-emerald-800/40 rounded-lg text-[11px] text-emerald-300 flex items-center gap-2 font-medium">
+              <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span>Grid Power Restored — 100% of affected poles confirmed energized from telemetry.</span>
+            </div>
+          )}
         </div>
 
         {/* 4. Operator Action Buttons */}

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import type { PoleRecord, Incident } from '@pgm/shared';
 import { ApiClient } from './api/client';
 import { subscribeToRealtimeEvents } from './api/socket';
@@ -15,7 +15,9 @@ export function App() {
   const [selectedIncident, setSelectedIncident] = useState<Incident | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-  const [isLive] = useState<boolean>(true);
+  // Keep a ref to selectedIncident so refreshData doesn't need it as a dep
+  const selectedIncidentRef = useRef<Incident | null>(null);
+  selectedIncidentRef.current = selectedIncident;
 
   // Fetch complete grid state from backend
   const refreshData = useCallback(async () => {
@@ -30,9 +32,10 @@ export function App() {
       setPoles(fetchedPoles);
       setIncidents(fetchedIncidents);
 
-      // Keep current selected incident updated if present
-      if (selectedIncident) {
-        const updated = fetchedIncidents.find((i) => i.incidentId === selectedIncident.incidentId);
+      // Keep current selected incident updated if present (use ref to avoid dep cycle)
+      const current = selectedIncidentRef.current;
+      if (current) {
+        const updated = fetchedIncidents.find((i) => i.incidentId === current.incidentId);
         if (updated) setSelectedIncident(updated);
       } else if (fetchedIncidents.length > 0) {
         // Select first active incident by default
@@ -45,7 +48,7 @@ export function App() {
     } finally {
       setIsLoading(false);
     }
-  }, [selectedIncident]);
+  }, []);
 
   // Initial load
   useEffect(() => {
@@ -66,14 +69,20 @@ export function App() {
         setSelectedIncident((curr: Incident | null) =>
           curr?.incidentId === updatedIncident.incidentId ? updatedIncident : curr
         );
+        ApiClient.getPoles().then(setPoles).catch(console.error);
       },
       onIncidentVerified: (verifiedIncident) => {
         setIncidents((prev) =>
           prev.map((i) => (i.incidentId === verifiedIncident.incidentId ? verifiedIncident : i))
         );
+        setSelectedIncident((curr: Incident | null) =>
+          curr?.incidentId === verifiedIncident.incidentId ? verifiedIncident : curr
+        );
+        ApiClient.getPoles().then(setPoles).catch(console.error);
       },
       onNetworkStateChanged: () => {
         ApiClient.getPoles().then(setPoles).catch(console.error);
+        ApiClient.getIncidents().then(setIncidents).catch(console.error);
       },
     });
 
@@ -106,7 +115,7 @@ export function App() {
       {/* Header Bar */}
       <Header
         incidents={incidents}
-        isLive={isLive}
+        isLive={true}
         onRefresh={refreshData}
         isLoading={isLoading}
       />

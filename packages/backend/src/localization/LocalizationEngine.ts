@@ -3,7 +3,7 @@ import type { TopologyIndex } from '../topology/TopologyIndex';
 import { TopologyInference, type InferredTopologyResult } from '../topology/TopologyInference';
 import { OutageEvaluator } from '../scheduler/OutageEvaluator';
 import { ConfidenceCalculator } from './ConfidenceCalculator';
-import type { LocalizedFault, ConfidenceBreakdown } from './types';
+import type { LocalizedFault } from './types';
 
 export interface LocalizationInput {
   topologyIndex: TopologyIndex;
@@ -91,17 +91,14 @@ export class LocalizationEngine {
         const rootPole = activeIndex.getPole(rootIds[0])!;
         const feederId = rootPole.feederId;
         const pincode = rootPole.pincode;
-        const lat = rootPole.lat;
-        const lon = rootPole.lon;
-
-        const affectedPoleIds = poleIds;
-        const confidenceBreakdown = LocalizationEngine.calculateConfidence(
-          topologySource,
-          affectedPoleIds,
-          activeIndex,
-          false
+        const lat = Number(
+          (poles.reduce((sum, p) => sum + p.lat, 0) / poles.length).toFixed(6)
+        );
+        const lon = Number(
+          (poles.reduce((sum, p) => sum + p.lon, 0) / poles.length).toFixed(6)
         );
 
+        const affectedPoleIds = poleIds;
         const confResult = ConfidenceCalculator.calculate({
           topologySource,
           precision: 'DT_LEVEL',
@@ -127,7 +124,6 @@ export class LocalizationEngine {
           affectedPoleCount: affectedPoleIds.length,
           reasons: confResult.reasons,
           confidence: confResult.score,
-          confidenceBreakdown,
           topologySource,
           precision: 'DT_LEVEL',
           isAmbiguous: false,
@@ -210,13 +206,6 @@ export class LocalizationEngine {
               isAmbiguous,
             });
 
-            const confidenceBreakdown = LocalizationEngine.calculateConfidence(
-              topologySource,
-              downstreamSubtree,
-              activeIndex,
-              isAmbiguous
-            );
-
             faults.push({
               faultType: 'span_fault',
               feederId: downstreamPole.feederId,
@@ -236,7 +225,6 @@ export class LocalizationEngine {
               affectedPoleCount: downstreamSubtree.length,
               reasons: confResult.reasons,
               confidence: confResult.score,
-              confidenceBreakdown,
               topologySource,
               precision,
               isAmbiguous,
@@ -276,41 +264,5 @@ export class LocalizationEngine {
     return faults;
   }
 
-  /**
-   * Calculates confidence score sub-components for a localized fault.
-   */
-  private static calculateConfidence(
-    topologySource: TopologySource,
-    affectedPoleIds: string[],
-    topologyIndex: TopologyIndex,
-    isAmbiguous: boolean
-  ): ConfidenceBreakdown {
-    // 1. Topology Score
-    const topologyScore =
-      topologySource === 'recorded' ? 1.0 : isAmbiguous ? 0.4 : 0.65;
-
-    // 2. Telemetry Coverage Score
-    let polesWithDevice = 0;
-    for (const pId of affectedPoleIds) {
-      const pole = topologyIndex.getPole(pId);
-      if (pole?.deviceId) polesWithDevice++;
-    }
-    const telemetryCoverageScore =
-      affectedPoleIds.length > 0 ? polesWithDevice / affectedPoleIds.length : 1.0;
-
-    // 3. Sensor Consistency Score
-    const sensorConsistencyScore = isAmbiguous ? 0.7 : 1.0;
-
-    // Weighted average
-    const overallConfidence = Number(
-      (topologyScore * 0.5 + telemetryCoverageScore * 0.3 + sensorConsistencyScore * 0.2).toFixed(2)
-    );
-
-    return {
-      topologyScore,
-      telemetryCoverageScore,
-      sensorConsistencyScore,
-      overallConfidence,
-    };
-  }
 }
+

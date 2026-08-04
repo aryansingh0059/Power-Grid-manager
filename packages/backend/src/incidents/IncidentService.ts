@@ -45,6 +45,8 @@ export class IncidentService {
 
       matchingIncident.affectedPoleIds = combinedPoles;
       matchingIncident.affectedPoleCount = combinedPoles.length;
+      matchingIncident.lat = fault.lat;
+      matchingIncident.lon = fault.lon;
       matchingIncident.boundary = {
         upstreamPoleId: fault.upstreamPoleId,
         downstreamPoleId: fault.downstreamPoleId,

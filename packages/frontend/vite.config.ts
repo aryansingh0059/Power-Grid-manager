@@ -13,10 +13,25 @@ export default defineConfig({
         target: 'http://localhost:4000',
         changeOrigin: true,
       },
+      '/socket.io': {
+        target: 'http://localhost:4000',
+        ws: true,
+        changeOrigin: true,
+      },
     },
   },
   build: {
     outDir: 'dist',
-    sourcemap: true,
+    sourcemap: false,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-leaflet': ['leaflet'],
+          'vendor-socketio': ['socket.io-client'],
+          'vendor-lucide': ['lucide-react'],
+        },
+      },
+    },
   },
 });

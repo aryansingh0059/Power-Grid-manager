@@ -140,10 +140,6 @@ incidentsRouter.post('/:id/resolve', async (req: Request, res: Response) => {
  * POST /api/incidents/:id/verify
  * Triggers telemetry restoration verification.
  */
-/**
- * POST /api/incidents/:id/verify
- * Triggers telemetry restoration verification.
- */
 incidentsRouter.post('/:id/verify', async (req: Request, res: Response) => {
   try {
     const incidentId = req.params.id;

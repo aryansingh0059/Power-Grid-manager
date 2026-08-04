@@ -1,10 +1,6 @@
 import type {
   PoleRecord,
-  DistributionTransformer,
-  Feeder,
-  Substation,
   Incident,
-  ScheduledOutage,
   ApiResponse,
 } from '@pgm/shared';
 
@@ -34,10 +30,6 @@ export const ApiClient = {
     const q = new URLSearchParams(params as Record<string, string>).toString();
     return fetchJson<PoleRecord[]>(`/api/network/poles${q ? `?${q}` : ''}`);
   },
-  getDts: (feederId?: string) =>
-    fetchJson<DistributionTransformer[]>(`/api/network/dts${feederId ? `?feederId=${feederId}` : ''}`),
-  getFeeders: () => fetchJson<Feeder[]>('/api/network/feeders'),
-  getSubstations: () => fetchJson<Substation[]>('/api/network/substations'),
 
   // Incidents
   getIncidents: (params?: { status?: string; feederId?: string; dtId?: string; pincode?: string }) => {
@@ -70,11 +62,6 @@ export const ApiClient = {
       `/api/incidents/${id}/explain`,
       { method: 'POST' }
     ),
-
-  // Outages & Telemetry
-  getOutages: () => fetchJson<ScheduledOutage[]>('/api/outages'),
-  getRecentTelemetry: (deviceId?: string) =>
-    fetchJson<Record<string, unknown>[]>(`/api/telemetry/recent${deviceId ? `?deviceId=${deviceId}` : ''}`),
 
   // Simulator
   injectSpanFault: (upstreamPoleId: string, downstreamPoleId: string) =>
