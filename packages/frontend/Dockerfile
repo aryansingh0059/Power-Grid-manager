@@ -13,6 +13,7 @@ RUN npm ci
 COPY packages/shared ./packages/shared
 COPY packages/frontend ./packages/frontend
 
+RUN npm run build -w packages/shared
 RUN npm run build -w packages/frontend
 
 # ── Stage 2: serve ────────────────────────────────────────────────────────────

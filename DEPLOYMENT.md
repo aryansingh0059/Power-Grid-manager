@@ -1,146 +1,126 @@
-# Deployment & Operations Guide
+# Deployment & Operations Guide — Power-Grid-Manager
 
-This document covers local and production container deployment, environment configuration, database seeding, verification steps, clean resets, and troubleshooting based on actual encountered issues.
+This document provides step-by-step instructions for running, evaluating, verifying, and troubleshooting the **Power-Grid-Manager** containerized application using Docker Compose.
 
 ---
 
-## 1. Prerequisites
+## 1. Zero-Configuration Reviewer Quickstart
 
-| Requirement | Minimum Version | Notes |
-|---|---|---|
-| **Docker Desktop** | $\ge 24.x$ | Recommended for single-command stack deployment |
-| **Docker Compose** | $\ge 2.x$ | Included with Docker Desktop |
-| **Node.js** *(Optional for host dev)* | $\ge 20.x$ | Node 20 or 24 LTS |
-| **MongoDB** *(Optional for host dev)* | $\ge 7.0$ | Running on port 27017 |
+A reviewer with only **Git**, **Docker**, and **Docker Compose** can launch the entire stack in one step without manual environment setup, database installation, or seed commands:
+
+```bash
+git clone https://github.com/aryansingh0059/Power-Grid-manager.git
+cd Power-Grid-Manager
+docker compose up
+```
+
+Once running:
+- **Frontend SPA**: [http://localhost:3000](http://localhost:3000)
+- **Backend API Health Check**: [http://localhost:4000/api/health](http://localhost:4000/api/health)
+- **MongoDB**: `localhost:27017`
 
 ---
 
 ## 2. Environment Variables & `.env.example`
 
-Copy `.env.example` to `.env` in the root directory before running:
+All environment variables have safe defaults built directly into the Docker Compose setup. No manual editing of `.env` is required for evaluation.
 
-```bash
-cp .env.example .env
-```
-
-### Environment Configuration Key Reference:
-
-```ini
-# Node Environment
-NODE_ENV=production
-
-# Server Port Settings
-PORT=4000
-FRONTEND_PORT=3000
-
-# Database Connection URI
-# In Docker Compose, MongoDB service hostname is 'mongo'
-MONGO_URI=mongodb://mongo:27017/pgm
-
-# (Optional) OpenAI API Key for Incident Explanation
-# If omitted or left empty, system uses deterministic template fallback
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4o-mini
-```
+| Variable | Purpose | Required / Optional | Default Value |
+|---|---|---|---|
+| `PORT` | Backend HTTP API port | Required | `4000` |
+| `NODE_ENV` | Runtime mode (`development` / `production`) | Required | `production` |
+| `MONGO_URI` | MongoDB connection string | Required | `mongodb://mongo:27017/pgm` |
+| `OPENAI_API_KEY` | OpenAI Key for incident summary generation | Optional | `""` (Degrades gracefully to deterministic summaries) |
+| `OPENAI_MODEL` | OpenAI Model identifier | Optional | `gpt-4o-mini` |
+| `VITE_API_BASE_URL` | Base URL for frontend API requests | Optional | `""` (Empty default lets Nginx handle proxying) |
 
 ---
 
-## 3. Deployment Options & Exact Commands
+## 3. Architecture & Service Orchestration
 
-### Option A: Single-Command Docker Compose (Recommended)
+Docker Compose orchestrates three required services:
 
-To start the complete production stack (MongoDB 7 + Node.js Backend API + Nginx React Frontend):
-
-```bash
-git clone https://github.com/aryansingh0059/Power-Grid-manager.git
-cd Power-Grid-Manager
-docker compose up --build
+```mermaid
+graph TD
+    Browser[Browser / User] -->|Port 3000| Nginx[Frontend Container - Nginx]
+    Nginx -->|Static Assets| SPA[React SPA]
+    Nginx -->|/api/* Proxy| Backend[Backend Container - Node.js]
+    Nginx -->|/socket.io/* Proxy| Backend
+    Backend -->|Mongoose connection| Mongo[(MongoDB Container - mongo:7)]
 ```
 
-- **Frontend Console**: [http://localhost:3000](http://localhost:3000)
-- **Backend API**: [http://localhost:4000/api/health](http://localhost:4000/api/health)
-- **MongoDB**: `localhost:27017`
-
-### Option B: Local Host Development (Without Docker)
-
-```bash
-# 1. Install workspace dependencies
-npm install
-
-# 2. Build shared workspace types
-npm run build -w packages/shared
-
-# 3. Start local MongoDB instance (or run mongo in Docker)
-docker compose up mongo -d
-
-# 4. Launch backend and frontend development servers with hot-reload
-npm run dev
-```
+1. **`mongo`**: Official MongoDB 7 image with persistent volume `mongo_data` and healthcheck.
+2. **`backend`**: Node.js Express API & Socket.IO server. Waits for `mongo` to be healthy, automatically connects with retry backoff, and seeds the synthetic power grid.
+3. **`frontend`**: React 18 SPA built and served via Nginx. Reverse-proxies `/api/` and `/socket.io/` requests to `http://backend:4000`.
 
 ---
 
-## 4. Automatic Database Seeding & Clean Reset
+## 4. Automatic Database Seeding
 
-### Automatic Seeding:
-On startup, `seedDatabaseIfNeeded()` runs automatically. If the database is empty, it seeds ~3,000 poles, 108 DTs, 9 feeders, 3 substations, and associated IoT devices deterministically.
+On initial boot, the backend automatically runs `seedDatabaseIfNeeded()`. If the database is empty, it populates the KSDB synthetic grid network:
 
-### Clean Data Reset:
-To purge database records and force a fresh synthetic grid seed:
+- **Substations**: 3
+- **Feeders**: 9
+- **Distribution Transformers (DTs)**: 108 (~40% with recorded topology, ~60% without recorded topology)
+- **Poles**: ~3,000 (~9% poles without devices)
+- **Hardware Devices**: Smart meters and fault indicators (including firmware 1.2.x devices)
+
+*Idempotency*: Subsequent container restarts detect existing records and skip re-seeding without data corruption or duplicate key errors.
+
+---
+
+## 5. Clean Environment Reset Procedure
+
+To perform a complete clean-slate reset (purge database volume, rebuild containers, and re-seed from scratch):
 
 ```bash
-# Docker Compose environment reset:
+# 1. Stop containers and purge persistent volumes
 docker compose down -v
-docker compose up
 
-# Host MongoDB environment reset:
-npm run seed -w packages/backend
+# 2. Build without cache and start containers
+docker compose build --no-cache
+docker compose up
 ```
 
 ---
 
-## 5. Verification & Health Checks
+## 6. End-to-End Verification Checklist
 
-Verify operational status by checking these endpoints:
+Verify complete functionality:
 
-1. **Backend Health Check**:
+1. **Health Check**:
    ```bash
    curl http://localhost:4000/api/health
    ```
-   *Expected Response*: `{"success": true, "data": {"status": "ok", "mongodb": "connected"}}`
+   *Expected Response*: `{"status":"ok","db":"connected"}`
 
-2. **Frontend UI Availability**:
-   Open [http://localhost:3000](http://localhost:3000) in browser. Ensure Leaflet map loads Bengaluru poles and top status bar displays `Grid Status: ONLINE`.
+2. **Frontend Map & Telemetry**:
+   Open `http://localhost:3000` in browser. Confirm Leaflet map renders poles and top bar shows status `ONLINE`.
 
-3. **Core Correctness Test Suite**:
+3. **Simulator Target & Fault Injection**:
+   - In Demo Studio / Simulator Panel, click **Use demo target**.
+   - Click **Inject Span Fault**.
+   - Observe real-time incident creation via Socket.IO without refreshing page.
+   - Click **Assign Crew**, **Resolve**, and **Verify Restoration**.
+
+4. **Automated Unit Tests**:
    ```bash
    npm run test:core
    ```
-   *Expected Result*: 126/126 passed cleanly across all 12 test files.
+   *Expected Output*: All core backend & simulator unit tests pass.
 
 ---
 
-## 6. Troubleshooting Encountered Issues
+## 7. Troubleshooting Encountered Issues
 
-### Issue 1: `TS6059: File ... is not under 'rootDir'` during `npm run build`
-- **Cause**: Backend `tsconfig.build.json` mapped `@pgm/shared` directly to source files `../shared/src/index.ts` instead of compiled declarations.
-- **Fix**: Update `@pgm/shared` path mapping in `packages/backend/tsconfig.build.json`:
-  ```json
-  "paths": {
-    "@pgm/shared": ["../shared/dist/index.d.ts"]
-  }
-  ```
+### Issue 1: Database Startup Race Condition
+- **Symptom**: Backend crashed on startup because MongoDB took a few seconds to accept connections.
+- **Resolution**: Implemented exponential retry backoff in `packages/backend/src/db/connection.ts` and set `depends_on: { mongo: { condition: service_healthy } }` in `docker-compose.yml`.
 
-### Issue 2: `MongoServerError: E11000 duplicate key error collection: test.devices index: poleId_1`
-- **Cause**: Dynamic upsert of telemetry packets from unseeded hardware devices without a `poleId` violated unique index constraints.
-- **Fix**: Ensure hardware devices have pre-registered pole IDs or default `poleId` handling during ingestion.
+### Issue 2: Browser CORS / Container Hostname Exposure
+- **Symptom**: Browser JavaScript trying to connect to internal Docker hostname `http://backend:4000` resulted in `ERR_NAME_NOT_RESOLVED`.
+- **Resolution**: Configured Nginx inside `frontend` container to reverse-proxy `/api/` and `/socket.io/` to `http://backend:4000`. The browser uses standard relative requests to `window.location.origin`.
 
-### Issue 3: `Pole validation failed: pincode: Path pincode is required`
-- **Cause**: Mongoose `PoleSchema` set `pincode` as required, but synthetic generator allows ~3% missing pincodes (`pincode: ''`).
-- **Fix**: Update schema definition in `packages/backend/src/db/models/Pole.ts`:
-  ```typescript
-  pincode: { type: String, default: '' }
-  ```
-
-### Issue 4: Docker Desktop Engine Pipe Connection Error (`open //./pipe/dockerDesktopLinuxEngine`)
-- **Cause**: Docker Desktop background daemon is stopped or not running on Windows host.
-- **Fix**: Launch Docker Desktop application on Windows before executing `docker compose up`.
+### Issue 3: Missing Shared Type Declarations in Docker Stage 1
+- **Symptom**: Docker build failed during `npm run build -w packages/frontend` because `@pgm/shared` types were not built first.
+- **Resolution**: Added explicit `RUN npm run build -w packages/shared` step before building frontend and backend packages in Dockerfiles.
