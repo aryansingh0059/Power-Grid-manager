@@ -10,8 +10,6 @@ import {
   Info,
   ExternalLink,
   ShieldCheck,
-  Sparkles,
-  Bot,
 } from 'lucide-react';
 import type { Incident, TimelineEntry } from '@pgm/shared';
 import { ApiClient } from '../api/client';
@@ -22,6 +20,31 @@ interface IncidentDetailProps {
   onAssignCrew: (id: string, crewId: string, crewName: string) => Promise<void>;
   onResolve: (id: string, note?: string) => Promise<void>;
   onVerify: (id: string) => Promise<void>;
+}
+
+function getConfidenceCategory(score: number): { label: string; color: string } {
+  if (score >= 85) return { label: 'HIGH CONFIDENCE', color: 'text-health-green' };
+  if (score >= 60) return { label: 'MEDIUM CONFIDENCE', color: 'text-amber-400' };
+  return { label: 'LOW CONFIDENCE', color: 'text-fault-red' };
+}
+
+function formatStatus(status: string): string {
+  switch (status) {
+    case 'detected':
+      return 'Unacknowledged';
+    case 'acknowledged':
+      return 'Acknowledged';
+    case 'crew_assigned':
+      return 'Crew Assigned';
+    case 'resolved':
+      return 'Resolved';
+    case 'verified':
+      return 'Verified';
+    case 'closed':
+      return 'Closed';
+    default:
+      return status;
+  }
 }
 
 export const IncidentDetail: React.FC<IncidentDetailProps> = ({
@@ -37,16 +60,15 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [aiSummary, setAiSummary] = useState<string | null>(null);
-  const [aiProvider, setAiProvider] = useState<string | null>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
 
   if (!incident) {
     return (
-      <div className="h-full bg-gray-900/80 border border-gray-800 rounded-2xl flex flex-col items-center justify-center p-8 text-center text-gray-500 backdrop-blur-md">
-        <Info className="w-10 h-10 text-gray-600 mb-3" />
-        <h3 className="text-sm font-semibold text-gray-300">No Incident Selected</h3>
-        <p className="text-xs text-gray-500 max-w-xs mt-1">
-          Select an active incident ticket from the left panel or click a fault boundary on the grid map.
+      <div className="h-full bg-surface-1 border border-border rounded-lg flex flex-col items-center justify-center p-6 text-center text-content-tertiary select-none">
+        <Info className="w-8 h-8 text-content-tertiary mb-2 opacity-50" />
+        <h3 className="text-xs font-semibold text-content-secondary">No Incident Selected</h3>
+        <p className="text-[11px] text-content-tertiary max-w-xs mt-1">
+          Select an incident ticket from the queue or click a fault marker on the map.
         </p>
       </div>
     );
@@ -58,7 +80,11 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
       : incident.boundary.confidence
   );
 
+  const confCategory = getConfidenceCategory(confScore);
   const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${incident.lat},${incident.lon}`;
+  const darkPoles = incident.affectedPoleIds?.length || incident.affectedPoleCount;
+  const isClosed = incident.status === 'closed';
+  const isUnacked = incident.status === 'detected';
 
   const handleAck = async () => {
     setActionLoading(true);
@@ -104,7 +130,7 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
     try {
       const res = await ApiClient.verifyRestoration(incident.incidentId);
       if (!res.verified) {
-        setActionError(`⚠️ Telemetry verification pending: ${res.darkPoleCount} of ${incident.affectedPoleIds?.length || 0} affected poles remain de-energized. Use 'Repair & Restore' in simulator first.`);
+        setActionError(`Restoration verification pending: ${res.darkPoleCount} of ${darkPoles} affected poles remain de-energized.`);
       } else {
         await onVerify(incident.incidentId);
       }
@@ -120,7 +146,6 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
     try {
       const res = await ApiClient.explainIncident(incident.incidentId);
       setAiSummary(res.summary);
-      setAiProvider(res.providerUsed === 'openai' ? `OpenAI ${res.modelUsed ?? ''}` : 'System Fallback (Deterministic)');
     } catch (err: unknown) {
       setActionError((err as Error).message);
     } finally {
@@ -129,224 +154,216 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-gray-900/90 border border-gray-800 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-md">
+    <div className="flex flex-col h-full bg-surface-1 border border-border rounded-lg overflow-hidden select-none">
       {/* Header Bar */}
-      <div className="p-4 border-b border-gray-800/80 flex items-center justify-between gap-3 bg-gray-950/60">
+      <div className="p-3 border-b border-border bg-surface-2/40 flex items-start justify-between gap-3 shrink-0">
         <div>
           <div className="flex items-center gap-2">
-            <span className="font-mono text-sm font-bold text-amber-400">
+            <span className="font-mono text-xs font-semibold text-content-primary">
               {incident.incidentId}
             </span>
             <span
-              className={`text-[10px] uppercase font-mono px-2 py-0.5 rounded font-bold ${
-                incident.status === 'detected'
-                  ? 'bg-red-500/20 text-red-400 border border-red-500/30'
-                  : incident.status === 'closed'
-                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+              className={`text-[10px] font-medium px-1.5 py-0.2 rounded ${
+                isUnacked
+                  ? 'bg-fault-red/15 text-fault-red'
+                  : isClosed
+                  ? 'bg-health-green/15 text-health-green'
+                  : 'bg-amber-400/15 text-amber-400'
               }`}
             >
-              {incident.status}
+              {formatStatus(incident.status)}
             </span>
           </div>
-          <p className="text-xs text-gray-300 font-semibold mt-0.5">
+          <p className="text-xs text-content-primary font-medium mt-1">
             {incident.boundary.description}
           </p>
         </div>
 
-        {/* Confidence Badge */}
-        <div className="text-right bg-emerald-950/40 border border-emerald-800/40 px-3 py-1.5 rounded-xl font-mono">
-          <div className="text-[10px] text-emerald-400 font-sans uppercase">Confidence</div>
-          <div className="text-sm font-bold text-emerald-300">{confScore}%</div>
+        {/* Confidence Score Pill */}
+        <div className="text-right shrink-0">
+          <div className={`text-xs font-mono font-semibold ${confCategory.color}`}>
+            {confScore}%
+          </div>
+          <div className="text-[9px] text-content-tertiary font-sans">
+            {confCategory.label.split(' ')[0]}
+          </div>
         </div>
       </div>
 
-      {/* Main Detail Body (Scrollable) */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
-        {/* Error Alert */}
+      {/* Main Detail Inspector Body (Scrollable) */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-3 text-xs">
+        {/* Error Alert Banner */}
         {actionError && (
-          <div className="p-3 bg-red-950/40 border border-red-800/50 rounded-xl text-red-300 flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{actionError}</span>
+          <div className="p-2.5 bg-surface-2 border border-fault-red rounded text-fault-red flex items-center gap-2">
+            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+            <span className="text-[11px]">{actionError}</span>
           </div>
         )}
 
-        {/* Unverified Restoration Warning Banner (Task 13 Mandatory Rule) */}
+        {/* Unverified Restoration Warning */}
         {incident.status === 'resolved' && (
-          <div className="p-3.5 bg-amber-950/70 border border-amber-500/60 rounded-xl text-amber-200 flex items-start gap-3 shadow-xl">
-            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <div className="font-bold text-xs text-amber-300 tracking-wide uppercase font-outfit">
-                Repair reported, but restoration has not been verified from telemetry.
+          <div className="p-2.5 bg-surface-2 border border-amber-400/60 rounded text-amber-400 flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="space-y-0.5 text-[11px]">
+              <div className="font-semibold text-content-primary">
+                Restoration Verification Pending
               </div>
-              <p className="text-[11px] text-amber-200/90 leading-relaxed font-sans">
-                Physical IoT telemetry sensors indicate affected poles remain de-energized.
-                Marking repair complete does NOT restore physical power until live telemetry confirmation.
+              <p className="text-content-secondary leading-normal">
+                Repair reported by crew, but physical telemetry confirmation is pending.
               </p>
             </div>
           </div>
         )}
 
-        {/* Scheduled Outage Evidence Banner */}
+        {/* Scheduled Outage Overlay */}
         {(incident.scheduledOutageId || incident.faultType === 'scheduled_outage') && (
-          <div className="p-3 bg-blue-950/60 border border-blue-500/50 rounded-xl text-blue-200 flex items-center gap-2.5">
-            <Info className="w-4 h-4 text-blue-400 shrink-0" />
-            <div className="text-xs">
-              <span className="font-bold text-blue-300">Scheduled Outage Overlap</span> — Matched feeder maintenance window ({incident.scheduledOutageId ?? 'OUTAGE-FEED'}).
-            </div>
+          <div className="p-2 bg-surface-2 border border-info-blue/50 rounded text-info-blue flex items-center gap-2 text-[11px]">
+            <Info className="w-3.5 h-3.5 shrink-0" />
+            <span>Scheduled maintenance window overlap ({incident.scheduledOutageId ?? 'OUTAGE-FEED'}).</span>
           </div>
         )}
 
-        {/* 1. Primary Location & Asset Grid */}
-        <div className="grid grid-cols-2 gap-2 bg-gray-950/80 p-3 rounded-xl border border-gray-800/80">
-          <div>
-            <span className="text-[10px] text-gray-500 uppercase font-mono">DT & Feeder</span>
-            <div className="font-mono text-gray-200 font-semibold mt-0.5">
-              {incident.dtId} <span className="text-gray-500">({incident.feederId})</span>
+        {/* Location & Impact */}
+        <div className="bg-surface-2 p-2.5 rounded border border-border space-y-2">
+          <div className="text-[10px] text-content-tertiary uppercase font-semibold">
+            Location & Impact
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-xs">
+            <div>
+              <span className="text-content-tertiary">DT Asset: </span>
+              <span className="font-mono text-content-primary font-medium">{incident.dtId}</span>
+            </div>
+            <div>
+              <span className="text-content-tertiary">Feeder: </span>
+              <span className="font-mono text-content-primary font-medium">{incident.feederId}</span>
+            </div>
+            <div>
+              <span className="text-content-tertiary">Pincode: </span>
+              <span className="font-mono text-content-primary font-medium">{incident.pincode ?? '560001'}</span>
+            </div>
+            <div>
+              <span className="text-content-tertiary">Impact: </span>
+              <span className="font-semibold text-content-primary">{darkPoles} poles</span>
             </div>
           </div>
 
-          <div>
-            <span className="text-[10px] text-gray-500 uppercase font-mono">Pincode</span>
-            <div className="font-mono text-gray-200 font-semibold mt-0.5">
-              {incident.pincode ?? '560001 (Inferred)'}
-            </div>
-          </div>
-
-          <div className="col-span-2 pt-2 border-t border-gray-800/50 flex items-center justify-between">
-            <div className="flex items-center gap-1.5 text-gray-300 font-mono">
-              <MapPin className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+          <div className="pt-2 border-t border-border flex items-center justify-between text-[11px]">
+            <div className="flex items-center gap-1 text-content-secondary font-mono">
+              <MapPin className="w-3 h-3 text-amber-400 shrink-0" />
               <span>
-                {incident.lat.toFixed(6)}, {incident.lon.toFixed(6)}
+                {incident.lat.toFixed(5)}, {incident.lon.toFixed(5)}
               </span>
             </div>
-
             <a
               href={googleMapsUrl}
               target="_blank"
               rel="noreferrer"
-              className="text-amber-400 hover:text-amber-300 flex items-center gap-1 font-medium hover:underline text-[11px]"
+              className="text-amber-400 hover:underline flex items-center gap-1 font-medium"
             >
-              Google Maps <ExternalLink className="w-3 h-3" />
+              Open in Maps <ExternalLink className="w-3 h-3" />
             </a>
           </div>
         </div>
 
-        {/* 2. Localization Precision & Explainable Confidence Reasons */}
-        <div className="bg-gray-950/80 p-3 rounded-xl border border-gray-800/80 space-y-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-gray-400 uppercase font-mono font-semibold">
-              Localization & Confidence Analysis
-            </span>
-            <span className="text-[11px] font-mono text-emerald-400 font-bold">
-              {confScore}% Score
-            </span>
+        {/* Localization & Evidence */}
+        <div className="bg-surface-2 p-2.5 rounded border border-border space-y-2">
+          <div className="flex items-center justify-between text-[10px] text-content-tertiary font-semibold uppercase">
+            <span>Localization Evidence</span>
+            <span className={confCategory.color}>{confCategory.label}</span>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="px-2 py-1 bg-blue-950/60 border border-blue-800/60 text-blue-300 rounded font-mono text-[11px]">
-              Precision: {incident.boundary.precision ?? 'ESTIMATED_SPAN'}
-            </span>
-            <span className="px-2 py-1 bg-purple-950/60 border border-purple-800/60 text-purple-300 rounded font-mono text-[11px]">
-              Source: {incident.boundary.topologySource}
-            </span>
-          </div>
-
-          {/* Explainable Reasons */}
-          <div className="space-y-1 bg-gray-900/60 p-2.5 rounded-lg border border-gray-800/60 text-[11px]">
-            <div className="text-[10px] text-gray-500 font-mono font-semibold uppercase mb-1">
-              Deterministic Evidence Breakdown:
+          <div className="text-xs text-content-secondary space-y-1">
+            <div className="flex items-baseline justify-between">
+              <span className="text-content-tertiary">Precision:</span>
+              <span className="font-mono text-content-primary">{incident.boundary.precision ?? 'ESTIMATED_SPAN'}</span>
             </div>
-            <div className="flex items-center gap-1.5 text-gray-300">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+            <div className="flex items-baseline justify-between">
+              <span className="text-content-tertiary">Topology Source:</span>
+              <span className="font-mono text-content-primary">{incident.boundary.topologySource}</span>
+            </div>
+          </div>
+
+          <div className="space-y-1 pt-1.5 border-t border-border text-[11px] text-content-secondary">
+            <div className="flex items-center gap-1.5">
+              <span className="text-health-green">✓</span>
               <span>
                 {incident.boundary.topologySource === 'recorded'
-                  ? 'Recorded parent-child topology confirmed (+40%)'
-                  : 'Geographically inferred topology via MST (+26%)'}
+                  ? 'Recorded parent-child grid topology confirmed'
+                  : 'Geographically inferred grid topology via MST'}
               </span>
             </div>
-            <div className="flex items-center gap-1.5 text-gray-300">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-              <span>Upstream pole {incident.boundary.upstreamPoleId ?? 'DT Root'} confirmed live (+25%)</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-gray-300">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
-              <span>Downstream pole {incident.boundary.downstreamPoleId} confirmed dark (+20%)</span>
-            </div>
+            {incident.boundary.upstreamPoleId && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-health-green">✓</span>
+                <span>Upstream pole {incident.boundary.upstreamPoleId} confirmed energized</span>
+              </div>
+            )}
+            {incident.boundary.downstreamPoleId && (
+              <div className="flex items-center gap-1.5">
+                <span className="text-health-green">✓</span>
+                <span>Downstream pole {incident.boundary.downstreamPoleId} confirmed dark</span>
+              </div>
+            )}
           </div>
         </div>
 
-        {/* 3. AI Incident Explanation Box */}
-        <div className="bg-gray-950/80 p-3 rounded-xl border border-gray-800/80 space-y-2">
-          <div className="flex items-center justify-between">
-            <div className="text-[10px] text-gray-400 uppercase font-mono font-semibold flex items-center gap-1.5">
-              <Bot className="w-3.5 h-3.5 text-amber-400" />
-              AI Operational Summary
-            </div>
-            {aiProvider && (
-              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 font-mono">
-                {aiProvider}
-              </span>
-            )}
+        {/* Operator Summary (AI Section) */}
+        <div className="bg-surface-2 p-2.5 rounded border border-border space-y-1.5">
+          <div className="text-[10px] text-content-tertiary uppercase font-semibold">
+            Operator Summary
           </div>
 
           {aiSummary || incident.aiSummary ? (
-            <div className="p-2.5 bg-gray-900/90 rounded-lg border border-gray-800 text-[11px] text-gray-200 leading-relaxed font-sans">
-              {aiSummary || incident.aiSummary}
+            <div className="space-y-1.5">
+              <p className="text-xs text-content-primary leading-relaxed bg-surface-1 p-2 rounded border border-border font-sans">
+                {aiSummary || incident.aiSummary}
+              </p>
+              <div className="text-[10px] text-content-tertiary">
+                AI-assisted · generated from deterministic incident data
+              </div>
             </div>
           ) : (
             <button
               onClick={handleGenerateAiSummary}
               disabled={isAiLoading}
-              className="w-full py-1.5 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-lg transition font-medium text-[11px] flex items-center justify-center gap-1.5 disabled:opacity-50"
+              className="w-full py-1.5 bg-surface-1 hover:bg-surface-3 border border-border text-content-secondary hover:text-content-primary rounded transition font-medium text-xs flex items-center justify-center gap-1.5 disabled:opacity-50"
             >
-              <Sparkles className={`w-3.5 h-3.5 text-amber-400 ${isAiLoading ? 'animate-spin' : ''}`} />
-              {isAiLoading ? 'Synthesizing Facts...' : 'Generate AI Operational Summary'}
+              <Zap className={`w-3.5 h-3.5 text-amber-400 ${isAiLoading ? 'animate-spin' : ''}`} />
+              {isAiLoading ? 'Generating Summary...' : 'Generate Operator Summary'}
             </button>
           )}
         </div>
 
-        {/* 3. Affected / Restored Poles Section */}
-        <div className="bg-gray-950/80 p-3 rounded-xl border border-gray-800/80 space-y-2">
-          <div className="flex items-center justify-between">
-            <span className="text-[10px] text-gray-400 uppercase font-mono font-semibold">
-              {['closed', 'verified'].includes(incident.status)
-                ? `Restored Energized Poles (${incident.affectedPoleIds?.length || 0})`
-                : `Affected Dark Poles (${incident.affectedPoleIds?.length || 0})`}
-            </span>
-            {['closed', 'verified'].includes(incident.status) ? (
-              <CheckCircle className="w-4 h-4 text-emerald-400" />
+        {/* Affected Poles */}
+        <div className="bg-surface-2 p-2.5 rounded border border-border space-y-1.5">
+          <div className="flex items-center justify-between text-[10px] text-content-tertiary font-semibold uppercase">
+            <span>Affected Poles ({darkPoles})</span>
+            {isClosed ? (
+              <CheckCircle className="w-3.5 h-3.5 text-health-green" />
             ) : (
-              <Zap className="w-4 h-4 text-purple-400" />
+              <Zap className="w-3.5 h-3.5 text-fault-red" />
             )}
           </div>
 
-          <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
+          <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
             {incident.affectedPoleIds?.map((pId: string) => (
               <span
                 key={pId}
-                className={`px-2 py-0.5 rounded text-[10px] font-mono ${
-                  ['closed', 'verified'].includes(incident.status)
-                    ? 'bg-emerald-950/40 border border-emerald-800/30 text-emerald-300'
-                    : 'bg-purple-950/40 border border-purple-800/30 text-purple-300'
+                className={`px-1.5 py-0.5 rounded text-[10px] font-mono border ${
+                  isClosed
+                    ? 'bg-surface-1 border-health-green/40 text-health-green'
+                    : 'bg-surface-1 border-border text-content-secondary'
                 }`}
               >
                 {pId}
               </span>
             ))}
           </div>
-
-          {['closed', 'verified'].includes(incident.status) && (
-            <div className="p-2 bg-emerald-950/40 border border-emerald-800/40 rounded-lg text-[11px] text-emerald-300 flex items-center gap-2 font-medium">
-              <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span>Grid Power Restored — 100% of affected poles confirmed energized from telemetry.</span>
-            </div>
-          )}
         </div>
 
-        {/* 4. Operator Action Buttons */}
-        <div className="bg-gray-950/80 p-3 rounded-xl border border-gray-800/80 space-y-2.5">
-          <div className="text-[10px] text-gray-400 uppercase font-mono font-semibold">
+        {/* Operator Workflow Actions */}
+        <div className="bg-surface-2 p-2.5 rounded border border-border space-y-2">
+          <div className="text-[10px] text-content-tertiary uppercase font-semibold">
             Operator Actions
           </div>
 
@@ -354,9 +371,9 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
             <button
               onClick={handleAck}
               disabled={actionLoading}
-              className="w-full py-2 bg-amber-600 hover:bg-amber-500 text-gray-950 font-bold rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-full py-1.5 bg-amber-400 hover:bg-amber-500 text-surface-0 font-semibold rounded transition flex items-center justify-center gap-1.5 disabled:opacity-50 text-xs"
             >
-              <UserCheck className="w-4 h-4" />
+              <UserCheck className="w-3.5 h-3.5" />
               Acknowledge Incident
             </button>
           )}
@@ -366,43 +383,43 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
               {!showCrewForm ? (
                 <button
                   onClick={() => setShowCrewForm(true)}
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl transition flex items-center justify-center gap-2"
+                  className="w-full py-1.5 bg-surface-1 hover:bg-surface-3 border border-border text-content-primary font-medium rounded transition flex items-center justify-center gap-1.5 text-xs"
                 >
-                  <UserCheck className="w-4 h-4" />
+                  <UserCheck className="w-3.5 h-3.5 text-amber-400" />
                   Assign Repair Crew
                 </button>
               ) : (
-                <form onSubmit={handleAssign} className="space-y-2 bg-gray-900 p-2.5 rounded-lg">
+                <form onSubmit={handleAssign} className="space-y-2 bg-surface-1 p-2 rounded border border-border">
                   <div>
-                    <label className="text-[10px] text-gray-400">Crew Name</label>
+                    <label className="text-[10px] text-content-tertiary">Crew Name</label>
                     <input
                       type="text"
                       value={crewName}
                       onChange={(e) => setCrewName(e.target.value)}
-                      className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-white"
+                      className="w-full bg-surface-2 border border-border rounded px-2 py-1 text-xs text-content-primary"
                     />
                   </div>
                   <div>
-                    <label className="text-[10px] text-gray-400">Crew ID</label>
+                    <label className="text-[10px] text-content-tertiary">Crew ID</label>
                     <input
                       type="text"
                       value={crewId}
                       onChange={(e) => setCrewId(e.target.value)}
-                      className="w-full bg-gray-950 border border-gray-700 rounded px-2 py-1 text-xs text-white"
+                      className="w-full bg-surface-2 border border-border rounded px-2 py-1 text-xs text-content-primary"
                     />
                   </div>
                   <div className="flex gap-2">
                     <button
                       type="submit"
                       disabled={actionLoading}
-                      className="flex-1 py-1.5 bg-blue-600 hover:bg-blue-500 font-bold text-white rounded text-xs"
+                      className="flex-1 py-1 bg-amber-400 text-surface-0 font-semibold rounded text-xs"
                     >
-                      Confirm Assignment
+                      Confirm
                     </button>
                     <button
                       type="button"
                       onClick={() => setShowCrewForm(false)}
-                      className="px-2 py-1.5 bg-gray-800 text-gray-400 rounded text-xs"
+                      className="px-2 py-1 bg-surface-2 text-content-tertiary rounded text-xs"
                     >
                       Cancel
                     </button>
@@ -416,10 +433,10 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
             <button
               onClick={handleResolve}
               disabled={actionLoading}
-              className="w-full py-2 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-full py-1.5 bg-surface-1 hover:bg-surface-3 border border-border text-content-primary font-medium rounded transition flex items-center justify-center gap-1.5 text-xs disabled:opacity-50"
             >
-              <CheckCircle className="w-4 h-4" />
-              Mark Work Resolved (Triggers Verification)
+              <CheckCircle className="w-3.5 h-3.5 text-health-green" />
+              Mark Work Resolved
             </button>
           )}
 
@@ -427,29 +444,29 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
             <button
               onClick={handleVerify}
               disabled={actionLoading}
-              className="w-full py-2 bg-emerald-600 hover:bg-emerald-500 text-gray-950 font-bold rounded-xl transition flex items-center justify-center gap-2 disabled:opacity-50"
+              className="w-full py-1.5 bg-health-green hover:bg-emerald-600 text-surface-0 font-semibold rounded transition flex items-center justify-center gap-1.5 disabled:opacity-50 text-xs"
             >
-              <ShieldCheck className="w-4 h-4" />
-              Verify Telemetry Restoration
+              <ShieldCheck className="w-3.5 h-3.5" />
+              Verify Restoration
             </button>
           )}
         </div>
 
-        {/* 5. Incident Timeline Audit Log */}
-        <div className="bg-gray-950/80 p-3 rounded-xl border border-gray-800/80 space-y-2">
-          <div className="text-[10px] text-gray-400 uppercase font-mono font-semibold flex items-center gap-1.5">
-            <Clock className="w-3.5 h-3.5 text-gray-500" />
-            Audit Timeline Log
+        {/* Audit Timeline */}
+        <div className="bg-surface-2 p-2.5 rounded border border-border space-y-2">
+          <div className="text-[10px] text-content-tertiary uppercase font-semibold flex items-center gap-1.5">
+            <Clock className="w-3 h-3" />
+            Timeline Log
           </div>
 
-          <div className="space-y-2 relative border-l border-gray-800 ml-2 pl-3">
+          <div className="space-y-2 relative border-l border-border ml-2 pl-3 text-xs">
             {incident.timeline?.map((entry: TimelineEntry, idx: number) => (
               <div key={idx} className="relative">
-                <span className="absolute -left-[17px] top-1 w-2 h-2 rounded-full bg-gray-700 border border-gray-900" />
-                <div className="text-[10px] text-gray-500 font-mono">
-                  {new Date(entry.at).toLocaleTimeString()}
+                <span className="absolute -left-[17px] top-1 w-2 h-2 rounded-full bg-surface-3 border border-border" />
+                <div className="text-[10px] text-content-tertiary font-mono">
+                  {new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </div>
-                <div className="text-xs text-gray-300 font-medium">{entry.note}</div>
+                <div className="text-xs text-content-secondary">{entry.note}</div>
               </div>
             ))}
           </div>
@@ -458,3 +475,4 @@ export const IncidentDetail: React.FC<IncidentDetailProps> = ({
     </div>
   );
 };
+

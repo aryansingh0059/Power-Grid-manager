@@ -111,7 +111,7 @@ export function App() {
   };
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-gray-950 text-gray-100 overflow-hidden font-sans select-none">
+    <div className="flex flex-col h-screen w-screen bg-surface-0 text-content-primary overflow-hidden font-sans">
       {/* Header Bar */}
       <Header
         incidents={incidents}
@@ -121,23 +121,23 @@ export function App() {
       />
 
       {/* Main Grid Content Area */}
-      <main className="flex-1 flex gap-4 p-4 min-h-0 overflow-hidden">
+      <main className="flex-1 flex gap-2 p-2 min-h-0 overflow-hidden relative">
         {/* Error Banner */}
         {error && (
-          <div className="absolute top-16 left-1/2 -translate-x-1/2 z-50 bg-red-950 border border-red-700 text-red-200 px-4 py-2 rounded-xl text-xs font-semibold shadow-2xl flex items-center gap-2">
-            <AlertCircle className="w-4 h-4 text-red-400" />
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-surface-2 border border-fault-red text-content-primary px-3 py-1.5 rounded text-xs font-medium shadow-lg flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 text-fault-red shrink-0" />
             <span>{error}</span>
             <button
               onClick={refreshData}
-              className="ml-2 underline text-red-300 hover:text-white"
+              className="ml-2 text-amber-400 hover:underline"
             >
               Retry
             </button>
           </div>
         )}
 
-        {/* Column 1: Incident Feed (Left ~340px) */}
-        <section className="w-80 lg:w-96 shrink-0 h-full">
+        {/* Column 1: Incident Queue (Left 300px - 340px) */}
+        <section className="w-80 xl:w-[340px] shrink-0 h-full">
           <IncidentList
             incidents={incidents}
             selectedIncident={selectedIncident}
@@ -145,8 +145,8 @@ export function App() {
           />
         </section>
 
-        {/* Column 2: GIS Grid Map (Center Flex-1) */}
-        <section className="flex-1 h-full min-w-[400px]">
+        {/* Column 2: Geographic Map (Center Flex-1) */}
+        <section className="flex-1 h-full min-w-[360px]">
           <GridMap
             poles={poles}
             incidents={incidents}
@@ -155,8 +155,8 @@ export function App() {
           />
         </section>
 
-        {/* Column 3: Incident Details & Action Panel (Right ~380px) */}
-        <section className="w-80 lg:w-96 shrink-0 h-full">
+        {/* Column 3: Incident Inspector (Right 340px - 380px) */}
+        <section className="w-80 xl:w-[360px] shrink-0 h-full">
           <IncidentDetail
             incident={selectedIncident}
             onAcknowledge={handleAcknowledge}
@@ -167,7 +167,7 @@ export function App() {
         </section>
       </main>
 
-      {/* Bottom Simulation Bar */}
+      {/* Bottom Simulator Bar */}
       <SimulatorPanel onRefresh={refreshData} />
     </div>
   );

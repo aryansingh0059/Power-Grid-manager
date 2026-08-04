@@ -16,8 +16,8 @@ export const Header: React.FC<HeaderProps> = ({
   isLoading,
 }) => {
   const activeIncidents = incidents.filter((i) => i.status !== 'closed');
-  const criticalCount = activeIncidents.filter((i) => i.status === 'detected').length;
-  const inProgressCount = activeIncidents.filter((i) =>
+  const unacknowledgedCount = activeIncidents.filter((i) => i.status === 'detected').length;
+  const inRepairCount = activeIncidents.filter((i) =>
     ['acknowledged', 'crew_assigned', 'resolved'].includes(i.status)
   ).length;
 
@@ -27,95 +27,86 @@ export const Header: React.FC<HeaderProps> = ({
   );
 
   return (
-    <header className="bg-gray-900/90 border-b border-gray-800 backdrop-blur-md px-6 py-3.5 flex flex-wrap items-center justify-between gap-4 sticky top-0 z-30 shadow-2xl">
-      {/* Brand & Sub-division Info */}
-      <div className="flex items-center gap-3">
-        <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 shadow-inner">
-          <Zap className="w-6 h-6 animate-pulse" />
-        </div>
-        <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-lg font-bold text-gray-100 font-outfit tracking-wide">
-              KSPTCL — LT Grid Control Room
-            </h1>
-            <span className="text-xs px-2 py-0.5 rounded-md bg-blue-500/10 text-blue-400 border border-blue-500/20 font-mono">
-              SUBDIVISION-04
-            </span>
-          </div>
-          <p className="text-xs text-gray-400">
-            Real-Time Low Tension Fault Detection & Automated Restoration Console
-          </p>
+    <header className="bg-surface-1 border-b border-border px-4 py-2 flex items-center justify-between gap-4 sticky top-0 z-30 shrink-0 select-none">
+      {/* Brand & Subdivision Identity */}
+      <div className="flex items-center gap-2.5">
+        <Zap className="w-4 h-4 text-amber-400 shrink-0" />
+        <div className="flex items-baseline gap-2">
+          <h1 className="text-sm font-semibold text-content-primary tracking-tight">
+            KSPTCL Grid Operations
+          </h1>
+          <span className="text-xs text-content-tertiary font-normal">
+            Subdivision 04 · LT Network
+          </span>
         </div>
       </div>
 
-      {/* Primary Grid Operational Metrics */}
-      <div className="flex items-center gap-6 bg-gray-950/60 px-4 py-2 rounded-xl border border-gray-800/80">
-        {/* Critical Unacknowledged */}
-        <div className="flex items-center gap-2.5">
-          <div className="p-1.5 rounded-lg bg-red-500/10 text-red-400">
-            <ShieldAlert className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="text-xs text-gray-400 font-medium">Unacknowledged</div>
-            <div className="text-sm font-bold text-red-400 font-mono">{criticalCount}</div>
-          </div>
+      {/* Operational Counters (Status Bar Style) */}
+      <div className="flex items-center gap-4 text-xs">
+        {/* Unacknowledged */}
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-content-tertiary">Unacknowledged</span>
+          <span
+            className={`font-mono font-semibold ${
+              unacknowledgedCount > 0 ? 'text-fault-red' : 'text-content-secondary'
+            }`}
+          >
+            {unacknowledgedCount}
+          </span>
         </div>
 
-        <div className="h-6 w-px bg-gray-800" />
+        <span className="text-border-subtle font-light">|</span>
 
         {/* In Repair */}
-        <div className="flex items-center gap-2.5">
-          <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400">
-            <Activity className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="text-xs text-gray-400 font-medium">In Repair</div>
-            <div className="text-sm font-bold text-amber-400 font-mono">{inProgressCount}</div>
-          </div>
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-content-tertiary">In Repair</span>
+          <span
+            className={`font-mono font-semibold ${
+              inRepairCount > 0 ? 'text-amber-400' : 'text-content-secondary'
+            }`}
+          >
+            {inRepairCount}
+          </span>
         </div>
 
-        <div className="h-6 w-px bg-gray-800" />
+        <span className="text-border-subtle font-light">|</span>
 
-        {/* Affected Poles */}
-        <div className="flex items-center gap-2.5">
-          <div className="p-1.5 rounded-lg bg-purple-500/10 text-purple-400">
-            <Zap className="w-4 h-4" />
-          </div>
-          <div>
-            <div className="text-xs text-gray-400 font-medium">Dark Poles</div>
-            <div className="text-sm font-bold text-purple-300 font-mono">{totalDarkPoles}</div>
-          </div>
+        {/* Dark Poles */}
+        <div className="flex items-baseline gap-1.5">
+          <span className="text-content-tertiary">Dark Poles</span>
+          <span
+            className={`font-mono font-semibold ${
+              totalDarkPoles > 0 ? 'text-fault-red' : 'text-content-secondary'
+            }`}
+          >
+            {totalDarkPoles}
+          </span>
         </div>
       </div>
 
-      {/* Actions & Socket Live Badge */}
+      {/* Realtime Live & Refresh Controls */}
       <div className="flex items-center gap-3">
-        {/* Socket.IO Live Indicator */}
-        <div
-          className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border text-xs font-medium font-mono ${
-            isLive
-              ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
-              : 'bg-amber-500/10 text-amber-400 border-amber-500/30'
-          }`}
-        >
+        {/* Live Indicator */}
+        <div className="flex items-center gap-1.5 text-xs text-content-secondary">
           <span
             className={`w-2 h-2 rounded-full ${
-              isLive ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'
+              isLive ? 'bg-health-green animate-pulse' : 'bg-amber-400'
             }`}
           />
-          {isLive ? 'LIVE FEED' : 'POLLING'}
+          <span className="font-medium text-[11px]">{isLive ? 'Live' : 'Polling'}</span>
         </div>
 
         {/* Refresh Button */}
         <button
           onClick={onRefresh}
           disabled={isLoading}
-          className="p-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 transition flex items-center justify-center disabled:opacity-50"
+          className="p-1.5 rounded hover:bg-surface-3 text-content-secondary hover:text-content-primary transition disabled:opacity-40"
           title="Refresh Grid State"
         >
-          <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
         </button>
       </div>
     </header>
   );
 };
+

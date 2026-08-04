@@ -8,6 +8,55 @@ interface IncidentListProps {
   onSelectIncident: (inc: Incident) => void;
 }
 
+// Helper to compute relative time from ISO string or Date
+function formatRelativeTime(dateStr?: string | Date): string {
+  if (!dateStr) return '';
+  const now = new Date().getTime();
+  const date = new Date(dateStr).getTime();
+  const diffMinutes = Math.floor((now - date) / (1000 * 60));
+  if (diffMinutes < 1) return 'Just now';
+  if (diffMinutes < 60) return `${diffMinutes}m ago`;
+  const diffHours = Math.floor(diffMinutes / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  return `${Math.floor(diffHours / 24)}d ago`;
+}
+
+function getFaultTypeLabel(type: string): string {
+  switch (type) {
+    case 'span_fault':
+      return 'SPAN FAULT';
+    case 'dt_fault':
+      return 'TRANSFORMER FAULT';
+    case 'feeder_fault':
+      return 'FEEDER OUTAGE';
+    case 'device_anomaly':
+      return 'DEVICE ANOMALY';
+    case 'scheduled_outage':
+      return 'SCHEDULED OUTAGE';
+    default:
+      return type.replace('_', ' ').toUpperCase();
+  }
+}
+
+function getStatusLabel(status: string): string {
+  switch (status) {
+    case 'detected':
+      return 'Unacknowledged';
+    case 'acknowledged':
+      return 'Acknowledged';
+    case 'crew_assigned':
+      return 'Crew Assigned';
+    case 'resolved':
+      return 'Resolved';
+    case 'verified':
+      return 'Verified';
+    case 'closed':
+      return 'Closed';
+    default:
+      return status;
+  }
+}
+
 export const IncidentList: React.FC<IncidentListProps> = ({
   incidents,
   selectedIncident,
@@ -38,85 +87,89 @@ export const IncidentList: React.FC<IncidentListProps> = ({
     return true;
   });
 
+  const activeCount = incidents.filter((i) => i.status !== 'closed').length;
+  const unacknowledgedCount = incidents.filter((i) => i.status === 'detected').length;
+  const inRepairCount = incidents.filter((i) => ['acknowledged', 'crew_assigned', 'resolved'].includes(i.status)).length;
+  const closedCount = incidents.filter((i) => i.status === 'closed').length;
+
   return (
-    <div className="flex flex-col h-full bg-gray-900/80 border border-gray-800 rounded-2xl overflow-hidden shadow-2xl backdrop-blur-md">
-      {/* Header & Tabs */}
-      <div className="p-4 border-b border-gray-800/80 space-y-3">
+    <div className="flex flex-col h-full bg-surface-1 border border-border rounded-lg overflow-hidden select-none">
+      {/* Header Area */}
+      <div className="p-3 border-b border-border space-y-2.5 shrink-0">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="w-5 h-5 text-amber-400" />
-            <h2 className="text-sm font-bold text-gray-100 font-outfit uppercase tracking-wider">
-              Incident Console
+            <h2 className="text-sm font-semibold text-content-primary">
+              Incidents
             </h2>
+            <span className="text-xs text-content-tertiary">
+              ({filtered.length})
+            </span>
           </div>
-          <span className="text-xs px-2 py-0.5 rounded-full bg-gray-800 text-gray-300 font-mono">
-            {filtered.length} tickets
-          </span>
         </div>
 
         {/* Search Input */}
         <div className="relative">
-          <Search className="w-4 h-4 text-gray-400 absolute left-3 top-2.5" />
+          <Search className="w-3.5 h-3.5 text-content-tertiary absolute left-2.5 top-2" />
           <input
             type="text"
-            placeholder="Search by DT, pole, feeder, pincode..."
+            placeholder="Search pole, DT, feeder, PIN..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full bg-gray-950 border border-gray-800 rounded-xl pl-9 pr-3 py-1.5 text-xs text-gray-200 placeholder-gray-500 focus:outline-none focus:border-amber-500/50 transition font-sans"
+            className="w-full bg-surface-2 border border-border rounded pl-8 pr-2.5 py-1 text-xs text-content-primary placeholder-content-tertiary focus:outline-none focus:border-amber-400/60 transition"
           />
         </div>
 
-        {/* Status Filter Tabs */}
-        <div className="flex gap-1 bg-gray-950 p-1 rounded-xl border border-gray-800/60 text-xs">
+        {/* Status Filter Segmented Controls */}
+        <div className="flex border-b border-border text-xs pt-1">
           <button
             onClick={() => setStatusFilter('active')}
-            className={`flex-1 py-1 rounded-lg text-center font-medium transition ${
+            className={`pb-1.5 px-2 font-medium transition border-b-2 text-center flex-1 ${
               statusFilter === 'active'
-                ? 'bg-gray-800 text-gray-100 shadow'
-                : 'text-gray-400 hover:text-gray-200'
+                ? 'border-amber-400 text-content-primary'
+                : 'border-transparent text-content-tertiary hover:text-content-secondary'
             }`}
           >
-            Active ({incidents.filter((i) => i.status !== 'closed').length})
+            Active ({activeCount})
           </button>
           <button
             onClick={() => setStatusFilter('detected')}
-            className={`flex-1 py-1 rounded-lg text-center font-medium transition ${
+            className={`pb-1.5 px-2 font-medium transition border-b-2 text-center flex-1 ${
               statusFilter === 'detected'
-                ? 'bg-red-500/20 text-red-300 border border-red-500/30'
-                : 'text-gray-400 hover:text-gray-200'
+                ? 'border-fault-red text-fault-red'
+                : 'border-transparent text-content-tertiary hover:text-content-secondary'
             }`}
           >
-            Unacked
+            Unack ({unacknowledgedCount})
           </button>
           <button
             onClick={() => setStatusFilter('in_repair')}
-            className={`flex-1 py-1 rounded-lg text-center font-medium transition ${
+            className={`pb-1.5 px-2 font-medium transition border-b-2 text-center flex-1 ${
               statusFilter === 'in_repair'
-                ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                : 'text-gray-400 hover:text-gray-200'
+                ? 'border-amber-400 text-amber-400'
+                : 'border-transparent text-content-tertiary hover:text-content-secondary'
             }`}
           >
-            In Repair
+            Repair ({inRepairCount})
           </button>
           <button
             onClick={() => setStatusFilter('closed')}
-            className={`flex-1 py-1 rounded-lg text-center font-medium transition ${
+            className={`pb-1.5 px-2 font-medium transition border-b-2 text-center flex-1 ${
               statusFilter === 'closed'
-                ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                : 'text-gray-400 hover:text-gray-200'
+                ? 'border-health-green text-health-green'
+                : 'border-transparent text-content-tertiary hover:text-content-secondary'
             }`}
           >
-            Closed
+            Closed ({closedCount})
           </button>
         </div>
       </div>
 
-      {/* Incident Cards List */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+      {/* Incident List Rows */}
+      <div className="flex-1 overflow-y-auto divide-y divide-border-subtle">
         {filtered.length === 0 ? (
-          <div className="h-full flex flex-col items-center justify-center text-center p-6 text-gray-500 space-y-2">
-            <CheckCircle className="w-8 h-8 text-emerald-500/40" />
-            <p className="text-xs font-medium">No incident tickets match your filters.</p>
+          <div className="h-full flex flex-col items-center justify-center text-center p-6 text-content-tertiary space-y-1">
+            <p className="text-xs font-medium text-content-secondary">No active incidents</p>
+            <p className="text-[11px]">The network is currently operating normally.</p>
           </div>
         ) : (
           filtered.map((inc) => {
@@ -127,76 +180,68 @@ export const IncidentList: React.FC<IncidentListProps> = ({
             const confScore = Math.round(
               inc.boundary.confidence <= 1 ? inc.boundary.confidence * 100 : inc.boundary.confidence
             );
-            const precision = inc.boundary.precision ?? 'ESTIMATED_SPAN';
+            const darkPoles = inc.affectedPoleIds?.length || inc.affectedPoleCount;
+            const timeAgo = formatRelativeTime(inc.detectedAt);
+
+            // Left indicator color
+            const borderIndicatorColor = isSelected
+              ? 'bg-amber-400'
+              : isUnacked
+              ? 'bg-fault-red'
+              : isClosed
+              ? 'bg-health-green'
+              : 'bg-amber-400';
 
             return (
               <div
                 key={inc.incidentId}
                 onClick={() => onSelectIncident(inc)}
-                className={`p-3.5 rounded-xl border transition cursor-pointer relative ${
+                className={`p-3 transition cursor-pointer relative flex gap-2.5 ${
                   isSelected
-                    ? 'bg-gray-800/90 border-amber-500/80 shadow-lg shadow-amber-500/10'
-                    : isUnacked
-                    ? 'bg-red-950/20 border-red-800/40 hover:border-red-600/60'
-                    : isClosed
-                    ? 'bg-gray-950/40 border-gray-800/40 opacity-75 hover:opacity-100'
-                    : 'bg-gray-950/80 border-gray-800/80 hover:border-gray-700'
+                    ? 'bg-surface-2'
+                    : 'hover:bg-surface-2/60 bg-surface-1'
                 }`}
               >
-                {/* Top Row: Ticket ID & Status Badge */}
-                <div className="flex items-center justify-between gap-2 mb-1.5">
-                  <div className="flex items-center gap-1.5 font-mono text-xs font-bold text-gray-200">
-                    <span className="text-amber-400">{inc.incidentId}</span>
-                    <span className="text-gray-500">•</span>
-                    <span className="text-gray-400">{inc.dtId}</span>
-                  </div>
+                {/* 3px Left Severity Bar Indicator */}
+                <div className={`w-0.5 shrink-0 rounded-full my-0.5 ${borderIndicatorColor}`} />
 
-                  {/* Status Badge */}
-                  <span
-                    className={`text-[10px] uppercase tracking-wider font-bold px-2 py-0.5 rounded-md font-mono ${
-                      inc.status === 'detected'
-                        ? 'bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse'
-                        : inc.status === 'acknowledged'
-                        ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                        : inc.status === 'crew_assigned'
-                        ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                        : inc.status === 'resolved'
-                        ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
-                        : 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                    }`}
-                  >
-                    {inc.status}
-                  </span>
-                </div>
-
-                {/* Boundary Description */}
-                <p className="text-xs text-gray-300 font-medium line-clamp-1 mb-2">
-                  {inc.boundary.description}
-                </p>
-
-                {/* Metadata Row: Precision, Confidence, Dark Poles */}
-                <div className="flex items-center justify-between text-[11px] text-gray-400 pt-1 border-t border-gray-800/50">
-                  <div className="flex items-center gap-2 font-mono">
+                <div className="flex-1 min-w-0 space-y-1">
+                  {/* Top Line: Fault Type & Status Badge */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] font-semibold tracking-wide text-content-primary">
+                      {getFaultTypeLabel(inc.faultType)}
+                    </span>
                     <span
-                      className={`px-1.5 py-0.5 rounded text-[10px] ${
-                        precision === 'EXACT_SPAN'
-                          ? 'bg-emerald-950 text-emerald-400 border border-emerald-800'
-                          : 'bg-amber-950 text-amber-400 border border-amber-800'
+                      className={`text-[10px] font-medium px-1.5 py-0.2 rounded ${
+                        isUnacked
+                          ? 'bg-fault-red/15 text-fault-red'
+                          : isClosed
+                          ? 'bg-health-green/15 text-health-green'
+                          : 'bg-amber-400/15 text-amber-400'
                       }`}
                     >
-                      {precision}
-                    </span>
-
-                    <span className="flex items-center gap-1 text-purple-300">
-                      <Zap className="w-3 h-3 text-purple-400" />
-                      {inc.affectedPoleIds?.length || inc.affectedPoleCount} dark
+                      {getStatusLabel(inc.status)}
                     </span>
                   </div>
 
-                  {/* Confidence Pill */}
-                  <div className="flex items-center gap-1 font-mono text-emerald-400">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                    <span>{confScore}% Conf</span>
+                  {/* ID & DT Asset info */}
+                  <div className="text-[11px] font-mono text-content-tertiary flex items-center gap-1.5">
+                    <span className="text-content-secondary">{inc.incidentId}</span>
+                    <span>·</span>
+                    <span>{inc.dtId}</span>
+                  </div>
+
+                  {/* Boundary Description */}
+                  <p className="text-xs text-content-primary truncate">
+                    {inc.boundary.description}
+                  </p>
+
+                  {/* Bottom Line: Poles + Confidence + Relative Age */}
+                  <div className="flex items-center justify-between text-[11px] text-content-tertiary pt-0.5">
+                    <span>
+                      {darkPoles} poles affected · {confScore}% confidence
+                    </span>
+                    <span>{timeAgo}</span>
                   </div>
                 </div>
               </div>
@@ -207,3 +252,4 @@ export const IncidentList: React.FC<IncidentListProps> = ({
     </div>
   );
 };
+

@@ -78,29 +78,29 @@ export const GridMap: React.FC<GridMapProps> = ({
       const isUpstream = selectedIncident?.boundary.upstreamPoleId === p.poleId;
       const isDownstream = selectedIncident?.boundary.downstreamPoleId === p.poleId;
 
-      let radius = 3;
-      let color = '#0284c7'; // Healthy cyan blue
-      let fillColor = '#38bdf8';
-      let fillOpacity = 0.35;
+      let radius = 2.5;
+      let color = '#4A7B8C'; // Subtle teal/neutral healthy pole
+      let fillColor = '#4A7B8C';
+      let fillOpacity = 0.4;
 
       if (isDark) {
         radius = 5;
-        color = '#dc2626';
-        fillColor = '#ef4444'; // Dark pole red
-        fillOpacity = 0.85;
+        color = '#D84A4A';
+        fillColor = '#D84A4A';
+        fillOpacity = 0.9;
       }
 
       if (isUpstream) {
-        radius = 8;
-        color = '#16a34a';
-        fillColor = '#22c55e'; // Upstream boundary pole green
+        radius = 6;
+        color = '#36A875';
+        fillColor = '#36A875';
         fillOpacity = 1;
       }
 
       if (isDownstream) {
-        radius = 9;
-        color = '#b91c1c';
-        fillColor = '#f87171'; // Downstream boundary pole red
+        radius = 7;
+        color = '#D84A4A';
+        fillColor = '#D84A4A';
         fillOpacity = 1;
       }
 
@@ -109,16 +109,21 @@ export const GridMap: React.FC<GridMapProps> = ({
         color,
         fillColor,
         fillOpacity,
-        weight: isUpstream || isDownstream ? 3 : 1,
+        weight: isUpstream || isDownstream ? 2 : 1,
       });
 
       marker.bindPopup(`
-        <div style="font-family: sans-serif; font-size: 12px; color: #1e293b;">
-          <strong>Pole ID: ${p.poleId}</strong><br/>
-          DT: ${p.dtId}<br/>
-          Feeder: ${p.feederId}<br/>
-          Status: <strong>${p.energized ? 'ENERGIZED' : 'DARK / DE-ENERGIZED'}</strong><br/>
-          Topology: ${p.topologySource}
+        <div style="font-family: Inter, system-ui, sans-serif; padding: 2px;">
+          <div style="font-family: JetBrains Mono, monospace; font-size: 13px; font-weight: 600; color: #F2F1ED; margin-bottom: 2px;">
+            ${p.poleId}
+          </div>
+          <div style="font-size: 11px; font-weight: 600; color: ${p.energized ? '#36A875' : '#D84A4A'}; margin-bottom: 6px;">
+            ${p.energized ? 'ENERGIZED' : 'DARK / DE-ENERGIZED'}
+          </div>
+          <div style="font-size: 11px; color: #A6ABB0; border-top: 1px solid #2C3137; padding-top: 4px;">
+            DT: ${p.dtId} · FDR: ${p.feederId}<br/>
+            Topology: ${p.topologySource}
+          </div>
         </div>
       `);
 
@@ -137,10 +142,10 @@ export const GridMap: React.FC<GridMapProps> = ({
         const isExact = precision === 'EXACT_SPAN';
 
         const polyline = L.polyline([upPos, downPos], {
-          color: isExact ? '#ef4444' : '#f59e0b',
-          weight: isSelected ? 6 : 4,
-          dashArray: isExact ? undefined : '8, 8',
-          opacity: isSelected ? 1 : 0.75,
+          color: isExact ? '#D84A4A' : '#E5A823',
+          weight: isSelected ? 4 : 3,
+          dashArray: isExact ? undefined : '8, 6',
+          opacity: isSelected ? 1 : 0.8,
         });
 
         polyline.bindTooltip(
@@ -156,10 +161,10 @@ export const GridMap: React.FC<GridMapProps> = ({
       if (inc.faultType === 'dt_fault' || !upPos) {
         const ring = L.circle([inc.lat, inc.lon], {
           radius: 120,
-          color: '#a855f7',
-          fillColor: '#c084fc',
-          fillOpacity: 0.2,
-          weight: 2,
+          color: '#E5A823',
+          fillColor: '#E5A823',
+          fillOpacity: 0.08,
+          weight: 1.5,
           dashArray: '4, 4',
         });
         ring.bindTooltip(`DT Outage Zone: ${inc.dtId}`, { sticky: true });
@@ -178,34 +183,34 @@ export const GridMap: React.FC<GridMapProps> = ({
   }, [selectedIncident]);
 
   return (
-    <div className="relative w-full h-full min-h-[450px] rounded-2xl overflow-hidden border border-gray-800 shadow-2xl bg-gray-950">
+    <div className="relative w-full h-full min-h-[400px] rounded-lg overflow-hidden border border-border bg-surface-0">
       {/* Container element for Leaflet */}
       <div ref={mapContainerRef} className="w-full h-full" />
 
       {/* Map Legend Overlay */}
-      <div className="absolute bottom-4 right-4 z-[400] bg-gray-900/90 backdrop-blur-md px-3.5 py-2.5 rounded-xl border border-gray-800 text-xs shadow-xl flex flex-col gap-1.5 font-mono">
-        <div className="text-gray-400 font-sans font-semibold mb-0.5 text-[11px]">GRID MAP LEGEND</div>
+      <div className="absolute bottom-3 right-3 z-[400] bg-surface-1/90 backdrop-blur-sm px-3 py-2 rounded border border-border text-[11px] shadow-lg flex flex-col gap-1.5 select-none">
         <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block" />
-          <span className="text-gray-300">Upstream Boundary Pole (Live)</span>
+          <span className="w-2 h-2 rounded-full bg-health-green inline-block shrink-0" />
+          <span className="text-content-secondary">Upstream boundary (Live)</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-red-500 inline-block" />
-          <span className="text-gray-300">Downstream Boundary Pole (Dark)</span>
+          <span className="w-2 h-2 rounded-full bg-fault-red inline-block shrink-0" />
+          <span className="text-content-secondary">Downstream boundary (Dark)</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-4 h-0.5 bg-red-500 inline-block" />
-          <span className="text-gray-300">Exact Span Fault</span>
+          <span className="w-3.5 h-0.5 bg-fault-red inline-block shrink-0" />
+          <span className="text-content-secondary">Confirmed fault span</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-4 h-0.5 border-b border-dashed border-amber-500 inline-block" />
-          <span className="text-gray-300">Estimated Span Fault</span>
+          <span className="w-3.5 h-0.5 border-b border-dashed border-amber-400 inline-block shrink-0" />
+          <span className="text-content-secondary">Estimated fault span</span>
         </div>
         <div className="flex items-center gap-2">
-          <span className="w-2.5 h-2.5 rounded-full bg-sky-400 opacity-60 inline-block" />
-          <span className="text-gray-400">Healthy Pole</span>
+          <span className="w-2 h-2 rounded-full bg-[#4A7B8C]/60 inline-block shrink-0" />
+          <span className="text-content-tertiary">Healthy pole</span>
         </div>
       </div>
     </div>
   );
 };
+

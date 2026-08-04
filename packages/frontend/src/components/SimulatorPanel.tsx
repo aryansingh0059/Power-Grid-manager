@@ -5,15 +5,35 @@ import {
   Wrench,
   AlertTriangle,
   ShieldOff,
-  Sliders,
   X,
   Info,
   CheckCircle2,
+  Calendar,
 } from 'lucide-react';
 import { ApiClient } from '../api/client';
 
 interface SimulatorPanelProps {
   onRefresh: () => void;
+}
+
+function getActiveSimulationText(activeFaults: string[]): string {
+  if (activeFaults.length === 0) return 'None';
+  return activeFaults.map((f) => {
+    switch (f) {
+      case 'span':
+        return 'Span fault';
+      case 'dt':
+        return 'Transformer fault';
+      case 'feeder':
+        return 'Feeder outage';
+      case 'kill':
+        return 'Device failure';
+      case 'outage':
+        return 'Scheduled outage';
+      default:
+        return f;
+    }
+  }).join(', ');
 }
 
 export const SimulatorPanel: React.FC<SimulatorPanelProps> = ({ onRefresh }) => {
@@ -57,203 +77,173 @@ export const SimulatorPanel: React.FC<SimulatorPanelProps> = ({ onRefresh }) => 
     setDtId('DT-001');
     setFeederId('FDR-01');
     setDeviceId('KSPDB-SD01-D001-1001');
-    setFeedbackMessage('Recommended demo targets selected (DT-001, Feeder FDR-01, Span P1->P2)');
+    setFeedbackMessage('Demo target set to DT-001 (P1 → P2)');
   };
+
+  const activeSimText = getActiveSimulationText(activeFaults);
+  const hasActiveFault = activeFaults.length > 0;
 
   return (
     <>
-      {/* Bottom Quick-Action Bar */}
-      <div className="bg-gray-900/95 border-t border-gray-800 backdrop-blur-md px-6 py-2.5 flex flex-wrap items-center justify-between gap-4 z-40 shrink-0">
-        {/* Label & Modal Opener */}
+      {/* Permanent Bottom Launcher Bar (Quiet & Unobtrusive) */}
+      <div className="bg-surface-1 border-t border-border px-4 py-1.5 flex items-center justify-between gap-4 z-40 shrink-0 text-xs select-none">
+        {/* Left: Launcher Button & Identity */}
         <div className="flex items-center gap-3">
-          <div className="p-1.5 rounded-lg bg-amber-500/10 text-amber-400">
-            <Play className="w-4 h-4 animate-pulse" />
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-gray-200 font-outfit uppercase tracking-wider">
-                Reviewer Fault Simulator Studio
-              </span>
-              <button
-                onClick={() => setIsDrawerOpen(true)}
-                className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[10px] font-mono hover:bg-amber-500/30 transition flex items-center gap-1"
-              >
-                <Sliders className="w-3 h-3" />
-                Open Demo Studio
-              </button>
-            </div>
-            <span className="text-[10px] text-gray-400">
-              Inject physical outages to observe the real ingestion + localization engine create tickets over Socket.IO
+          <button
+            onClick={() => setIsDrawerOpen(true)}
+            className="px-2.5 py-1 rounded bg-surface-2 hover:bg-surface-3 border border-border text-content-primary font-medium transition flex items-center gap-1.5 text-xs"
+          >
+            <Play className="w-3 h-3 text-amber-400 fill-amber-400" />
+            Open Simulator
+          </button>
+          <span className="text-content-tertiary text-[11px] hidden sm:inline">
+            Demo Simulator
+          </span>
+        </div>
+
+        {/* Center: Active Simulation Status */}
+        <div className="flex items-center gap-2 text-[11px] text-content-tertiary">
+          <span>Active simulation:</span>
+          <span className={`font-medium ${hasActiveFault ? 'text-amber-400 font-mono' : 'text-content-secondary'}`}>
+            {activeSimText}
+          </span>
+        </div>
+
+        {/* Right: Contextual Quick Repair Action */}
+        <div className="flex items-center gap-2">
+          {hasActiveFault && (
+            <button
+              onClick={() => runSim('repair', () => ApiClient.repairFault(dtId))}
+              disabled={!!loadingAction}
+              className="px-2.5 py-1 rounded bg-health-green hover:bg-emerald-600 text-surface-0 font-semibold text-xs transition flex items-center gap-1 disabled:opacity-50"
+            >
+              <Wrench className="w-3 h-3" />
+              Repair Fault
+            </button>
+          )}
+
+          {feedbackMessage && (
+            <span className="text-[11px] text-content-tertiary font-mono truncate max-w-xs">
+              {feedbackMessage}
             </span>
-          </div>
+          )}
         </div>
-
-        {/* Quick Simulator Buttons */}
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <button
-            onClick={() => runSim('span', () => ApiClient.injectSpanFault('P1', 'P2'))}
-            disabled={!!loadingAction}
-            className="px-3 py-1.5 rounded-xl bg-red-950/60 hover:bg-red-900/80 text-red-300 border border-red-800/60 font-medium transition flex items-center gap-1.5 disabled:opacity-50"
-          >
-            <Zap className="w-3.5 h-3.5 text-red-400" />
-            Span Fault (P1→P2)
-          </button>
-
-          <button
-            onClick={() => runSim('dt', () => ApiClient.injectDtFault('DT-001'))}
-            disabled={!!loadingAction}
-            className="px-3 py-1.5 rounded-xl bg-purple-950/60 hover:bg-purple-900/80 text-purple-300 border border-purple-800/60 font-medium transition flex items-center gap-1.5 disabled:opacity-50"
-          >
-            <AlertTriangle className="w-3.5 h-3.5 text-purple-400" />
-            DT Outage (DT-001)
-          </button>
-
-          <button
-            onClick={() => runSim('kill', () => ApiClient.killDevice('KSPDB-SD01-D001-1001'))}
-            disabled={!!loadingAction}
-            className="px-3 py-1.5 rounded-xl bg-gray-800 hover:bg-gray-700 text-gray-300 border border-gray-700 font-medium transition flex items-center gap-1.5 disabled:opacity-50"
-          >
-            <ShieldOff className="w-3.5 h-3.5 text-gray-400" />
-            Kill Device
-          </button>
-
-          <button
-            onClick={() => runSim('repair', () => ApiClient.repairFault('DT-001'))}
-            disabled={!!loadingAction}
-            className="px-3 py-1.5 rounded-xl bg-emerald-950/60 hover:bg-emerald-900/80 text-emerald-300 border border-emerald-800/60 font-bold transition flex items-center gap-1.5 disabled:opacity-50"
-          >
-            <Wrench className="w-3.5 h-3.5 text-emerald-400" />
-            Repair & Restore (DT-001)
-          </button>
-        </div>
-
-        {/* Feedback Message */}
-        {feedbackMessage && (
-          <div className="text-xs font-mono text-amber-300 bg-amber-950/40 border border-amber-800/40 px-3 py-1 rounded-lg">
-            {feedbackMessage}
-          </div>
-        )}
       </div>
 
-      {/* Expanded Reviewer Studio Drawer / Modal */}
+      {/* Demo Simulator Modal */}
       {isDrawerOpen && (
-        <div className="fixed inset-0 z-[9999] bg-black/80 backdrop-blur-md flex items-center justify-center p-4">
-          <div className="bg-gray-900 border border-gray-800 w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 z-[9999] bg-surface-0/80 backdrop-blur-sm flex items-center justify-center p-4 select-none">
+          <div className="bg-surface-1 border border-border w-full max-w-xl rounded-lg shadow-2xl overflow-hidden flex flex-col max-h-[85vh]">
             {/* Modal Header */}
-            <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between bg-gray-950/80">
-              <div className="flex items-center gap-2">
-                <Play className="w-5 h-5 text-amber-400" />
-                <h3 className="text-base font-bold text-gray-100 font-outfit uppercase tracking-wider">
-                  Reviewer Interactive Demo Studio
+            <div className="px-4 py-3 border-b border-border flex items-center justify-between bg-surface-2/40">
+              <div>
+                <h3 className="text-sm font-semibold text-content-primary">
+                  Demo Simulator
                 </h3>
+                <p className="text-[11px] text-content-tertiary">
+                  Inject controlled network conditions to verify detection and restoration behavior.
+                </p>
               </div>
               <button
                 onClick={() => setIsDrawerOpen(false)}
-                className="p-1 rounded-lg text-gray-400 hover:text-white hover:bg-gray-800 transition"
+                className="p-1 rounded text-content-tertiary hover:text-content-primary hover:bg-surface-3 transition"
               >
-                <X className="w-5 h-5" />
+                <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Modal Body */}
-            <div className="p-6 space-y-5 overflow-y-auto flex-1 text-xs">
-              {/* Target Picker Bar */}
-              <div className="flex items-center justify-between bg-gray-950 p-3 rounded-xl border border-gray-800">
-                <div className="text-gray-300 font-medium">Quick Demo Preset:</div>
+            <div className="p-4 space-y-4 overflow-y-auto flex-1 text-xs">
+              {/* Recommended Target Selector */}
+              <div className="flex items-center justify-between bg-surface-2 p-2.5 rounded border border-border">
+                <span className="text-content-secondary">Target selection preset:</span>
                 <button
                   onClick={handlePickRecommended}
-                  className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold hover:bg-amber-500/30 transition flex items-center gap-1.5"
+                  className="px-2.5 py-1 rounded bg-surface-1 hover:bg-surface-3 text-amber-400 border border-border font-medium transition flex items-center gap-1 text-[11px]"
                 >
-                  <CheckCircle2 className="w-3.5 h-3.5 text-amber-400" />
-                  Pick Recommended Demo Target
+                  <CheckCircle2 className="w-3 h-3" />
+                  Use demo target
                 </button>
               </div>
 
               {/* Scenario Tabs */}
-              <div className="flex gap-1 bg-gray-950 p-1 rounded-xl border border-gray-800 font-mono">
+              <div className="flex border-b border-border text-xs">
                 <button
                   onClick={() => setActiveTab('span')}
-                  className={`flex-1 py-1.5 rounded-lg text-center font-medium transition ${
+                  className={`pb-2 px-3 font-medium transition border-b-2 ${
                     activeTab === 'span'
-                      ? 'bg-red-500/20 text-red-300 border border-red-500/30'
-                      : 'text-gray-400 hover:text-gray-200'
+                      ? 'border-fault-red text-fault-red'
+                      : 'border-transparent text-content-tertiary hover:text-content-secondary'
                   }`}
                 >
                   Span Fault
                 </button>
                 <button
                   onClick={() => setActiveTab('dt')}
-                  className={`flex-1 py-1.5 rounded-lg text-center font-medium transition ${
+                  className={`pb-2 px-3 font-medium transition border-b-2 ${
                     activeTab === 'dt'
-                      ? 'bg-purple-500/20 text-purple-300 border border-purple-500/30'
-                      : 'text-gray-400 hover:text-gray-200'
+                      ? 'border-amber-400 text-amber-400'
+                      : 'border-transparent text-content-tertiary hover:text-content-secondary'
                   }`}
                 >
                   DT Fault
                 </button>
                 <button
                   onClick={() => setActiveTab('feeder')}
-                  className={`flex-1 py-1.5 rounded-lg text-center font-medium transition ${
+                  className={`pb-2 px-3 font-medium transition border-b-2 ${
                     activeTab === 'feeder'
-                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                      : 'text-gray-400 hover:text-gray-200'
+                      ? 'border-amber-400 text-amber-400'
+                      : 'border-transparent text-content-tertiary hover:text-content-secondary'
                   }`}
                 >
                   Feeder Outage
                 </button>
                 <button
                   onClick={() => setActiveTab('device')}
-                  className={`flex-1 py-1.5 rounded-lg text-center font-medium transition ${
+                  className={`pb-2 px-3 font-medium transition border-b-2 ${
                     activeTab === 'device'
-                      ? 'bg-blue-500/20 text-blue-300 border border-blue-500/30'
-                      : 'text-gray-400 hover:text-gray-200'
+                      ? 'border-info-blue text-info-blue'
+                      : 'border-transparent text-content-tertiary hover:text-content-secondary'
                   }`}
                 >
-                  Device Fail
+                  Device Failure
                 </button>
                 <button
                   onClick={() => setActiveTab('outage')}
-                  className={`flex-1 py-1.5 rounded-lg text-center font-medium transition ${
+                  className={`pb-2 px-3 font-medium transition border-b-2 ${
                     activeTab === 'outage'
-                      ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
-                      : 'text-gray-400 hover:text-gray-200'
+                      ? 'border-health-green text-health-green'
+                      : 'border-transparent text-content-tertiary hover:text-content-secondary'
                   }`}
                 >
-                  Schedule
+                  Scheduled Outage
                 </button>
               </div>
 
-              {/* Tab Content & Explanation Card */}
+              {/* Tab Scenario Details */}
               {activeTab === 'span' && (
-                <div className="space-y-3 bg-gray-950 p-4 rounded-xl border border-gray-800">
-                  <div className="flex items-start gap-2 text-amber-300 bg-amber-950/40 p-3 rounded-lg border border-amber-800/40">
-                    <Info className="w-4 h-4 shrink-0 mt-0.5" />
-                    <div>
-                      <div className="font-bold mb-0.5">Scenario 1: LT Line Span Failure</div>
-                      <p className="text-[11px] text-amber-200/80 leading-relaxed font-sans">
-                        Simulates a physical line break between an energized upstream pole and a dark downstream pole.
-                        The engine isolates candidate boundary <code className="text-amber-300">P2 → P3</code> and groups downstream dark poles into a single incident.
-                      </p>
-                    </div>
-                  </div>
+                <div className="space-y-3 bg-surface-2 p-3 rounded border border-border">
+                  <p className="text-content-secondary leading-relaxed text-[11px]">
+                    Simulates a physical line break between two adjacent LT poles. Downstream poles lose power and the localization engine isolates candidate boundary span.
+                  </p>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className="text-[10px] text-gray-400 font-mono">Upstream Pole ID</label>
+                      <label className="text-[10px] text-content-tertiary">Upstream Pole</label>
                       <input
                         type="text"
                         value={upstreamPole}
                         onChange={(e) => setUpstreamPole(e.target.value)}
-                        className="w-full bg-gray-900 border border-gray-700 rounded px-2.5 py-1.5 text-white font-mono"
+                        className="w-full bg-surface-1 border border-border rounded px-2 py-1 text-content-primary font-mono text-xs"
                       />
                     </div>
                     <div>
-                      <label className="text-[10px] text-gray-400 font-mono">Downstream Pole ID</label>
+                      <label className="text-[10px] text-content-tertiary">Downstream Pole</label>
                       <input
                         type="text"
                         value={downstreamPole}
                         onChange={(e) => setDownstreamPole(e.target.value)}
-                        className="w-full bg-gray-900 border border-gray-700 rounded px-2.5 py-1.5 text-white font-mono"
+                        className="w-full bg-surface-1 border border-border rounded px-2 py-1 text-content-primary font-mono text-xs"
                       />
                     </div>
                   </div>
@@ -263,125 +253,124 @@ export const SimulatorPanel: React.FC<SimulatorPanelProps> = ({ onRefresh }) => 
                       runSim('span', () => ApiClient.injectSpanFault(upstreamPole, downstreamPole))
                     }
                     disabled={!!loadingAction}
-                    className="w-full py-2 bg-red-600 hover:bg-red-500 font-bold text-white rounded-xl transition flex items-center justify-center gap-2"
+                    className="w-full py-1.5 bg-fault-red hover:bg-red-600 font-semibold text-surface-0 rounded transition flex items-center justify-center gap-1.5 text-xs disabled:opacity-50"
                   >
-                    <Zap className="w-4 h-4" />
-                    Inject Span Break ({upstreamPole} → {downstreamPole})
+                    <Zap className="w-3.5 h-3.5" />
+                    Inject Span Fault ({upstreamPole} → {downstreamPole})
                   </button>
                 </div>
               )}
+
               {activeTab === 'dt' && (
-                <div className="space-y-3 bg-gray-950 p-4 rounded-xl border border-gray-800">
-                  <div className="flex items-start gap-2 text-purple-300 bg-purple-950/40 p-3 rounded-lg border border-purple-800/40">
-                    <Info className="w-4 h-4 shrink-0 mt-0.5" />
-                    <div>
-                      <div className="font-bold mb-0.5">Scenario 2: Distribution Transformer Failure</div>
-                      <p className="text-[11px] text-purple-200/80 leading-relaxed font-sans">
-                        Trips a Distribution Transformer breaker. Tests DT-level outage detection when 100% of observable poles under the transformer report de-energized.
-                      </p>
-                    </div>
-                  </div>
+                <div className="space-y-3 bg-surface-2 p-3 rounded border border-border">
+                  <p className="text-content-secondary leading-relaxed text-[11px]">
+                    Trips a Distribution Transformer breaker. Tests DT-level outage localization when 100% of poles under the transformer report de-energized.
+                  </p>
 
                   <div>
-                    <label className="text-[10px] text-gray-400 font-mono">Transformer ID</label>
+                    <label className="text-[10px] text-content-tertiary">Distribution Transformer ID</label>
                     <input
                       type="text"
                       value={dtId}
                       onChange={(e) => setDtId(e.target.value)}
-                      className="w-full bg-gray-900 border border-gray-700 rounded px-2.5 py-1.5 text-white font-mono"
+                      className="w-full bg-surface-1 border border-border rounded px-2 py-1 text-content-primary font-mono text-xs"
                     />
                   </div>
 
                   <button
                     onClick={() => runSim('dt', () => ApiClient.injectDtFault(dtId))}
                     disabled={!!loadingAction}
-                    className="w-full py-2 bg-purple-600 hover:bg-purple-500 font-bold text-white rounded-xl transition flex items-center justify-center gap-2"
+                    className="w-full py-1.5 bg-amber-400 hover:bg-amber-500 font-semibold text-surface-0 rounded transition flex items-center justify-center gap-1.5 text-xs disabled:opacity-50"
                   >
-                    <AlertTriangle className="w-4 h-4" />
+                    <AlertTriangle className="w-3.5 h-3.5" />
                     Inject Transformer Outage ({dtId})
                   </button>
                 </div>
               )}
 
               {activeTab === 'feeder' && (
-                <div className="space-y-3 bg-gray-950 p-4 rounded-xl border border-gray-800">
-                  <div className="flex items-start gap-2 text-amber-300 bg-amber-950/40 p-3 rounded-lg border border-amber-800/40">
-                    <Info className="w-4 h-4 shrink-0 mt-0.5" />
-                    <div>
-                      <div className="font-bold mb-0.5">Scenario 3: 11kV Feeder Outage</div>
-                      <p className="text-[11px] text-amber-200/80 leading-relaxed font-sans">
-                        Trips an entire 11kV feeder breaker at the substation. Tests multi-DT fault grouping across all transformers on feeder {feederId}.
-                      </p>
-                    </div>
-                  </div>
+                <div className="space-y-3 bg-surface-2 p-3 rounded border border-border">
+                  <p className="text-content-secondary leading-relaxed text-[11px]">
+                    Trips an entire 11kV feeder breaker at the substation. Tests multi-DT fault grouping across all transformers on feeder {feederId}.
+                  </p>
 
                   <div>
-                    <label className="text-[10px] text-gray-400 font-mono">Feeder ID</label>
+                    <label className="text-[10px] text-content-tertiary">Feeder ID</label>
                     <input
                       type="text"
                       value={feederId}
                       onChange={(e) => setFeederId(e.target.value)}
-                      className="w-full bg-gray-900 border border-gray-700 rounded px-2.5 py-1.5 text-white font-mono"
+                      className="w-full bg-surface-1 border border-border rounded px-2 py-1 text-content-primary font-mono text-xs"
                     />
                   </div>
 
                   <button
                     onClick={() => runSim('feeder', () => ApiClient.injectFeederFault(feederId))}
                     disabled={!!loadingAction}
-                    className="w-full py-2 bg-amber-600 hover:bg-amber-500 font-bold text-gray-950 rounded-xl transition flex items-center justify-center gap-2"
+                    className="w-full py-1.5 bg-amber-400 hover:bg-amber-500 font-semibold text-surface-0 rounded transition flex items-center justify-center gap-1.5 text-xs disabled:opacity-50"
                   >
-                    <Zap className="w-4 h-4" />
-                    Inject Feeder Trip ({feederId})
+                    <Zap className="w-3.5 h-3.5" />
+                    Inject Feeder Outage ({feederId})
                   </button>
                 </div>
               )}
 
               {activeTab === 'device' && (
-                <div className="space-y-3 bg-gray-950 p-4 rounded-xl border border-gray-800">
-                  <div className="flex items-start gap-2 text-blue-300 bg-blue-950/40 p-3 rounded-lg border border-blue-800/40">
-                    <Info className="w-4 h-4 shrink-0 mt-0.5" />
-                    <div>
-                      <div className="font-bold mb-0.5">Scenario 4: Device Failure (False-Positive Test)</div>
-                      <p className="text-[11px] text-blue-200/80 leading-relaxed font-sans">
-                        Silences telemetry on an IoT device while physical power stays healthy. Proves post-order sensor anomaly filter prevents false line-fault tickets.
-                      </p>
-                    </div>
-                  </div>
+                <div className="space-y-3 bg-surface-2 p-3 rounded border border-border">
+                  <p className="text-content-secondary leading-relaxed text-[11px]">
+                    Silences telemetry on an IoT device while physical power stays healthy. Verifies post-order sensor anomaly filter prevents false line-fault tickets.
+                  </p>
 
                   <div>
-                    <label className="text-[10px] text-gray-400 font-mono">Device ID</label>
+                    <label className="text-[10px] text-content-tertiary">Device ID</label>
                     <input
                       type="text"
                       value={deviceId}
                       onChange={(e) => setDeviceId(e.target.value)}
-                      className="w-full bg-gray-900 border border-gray-700 rounded px-2.5 py-1.5 text-white font-mono"
+                      className="w-full bg-surface-1 border border-border rounded px-2 py-1 text-content-primary font-mono text-xs"
                     />
                   </div>
 
                   <button
                     onClick={() => runSim('kill', () => ApiClient.killDevice(deviceId))}
                     disabled={!!loadingAction}
-                    className="w-full py-2 bg-gray-800 hover:bg-gray-700 font-bold text-gray-200 rounded-xl transition flex items-center justify-center gap-2"
+                    className="w-full py-1.5 bg-surface-1 hover:bg-surface-3 border border-border text-content-primary font-medium rounded transition flex items-center justify-center gap-1.5 text-xs disabled:opacity-50"
                   >
-                    <ShieldOff className="w-4 h-4" />
-                    Silence Device Telemetry ({deviceId})
+                    <ShieldOff className="w-3.5 h-3.5 text-content-tertiary" />
+                    Simulate Hardware Failure ({deviceId})
                   </button>
                 </div>
               )}
 
-              {/* Global Repair Controls */}
-              <div className="pt-2 border-t border-gray-800 flex items-center justify-between">
-                <div className="text-gray-400 font-mono text-[11px]">
-                  Active Faults: <span className="text-amber-400 font-bold">{activeFaults.length > 0 ? activeFaults.join(', ') : 'None'}</span>
+              {activeTab === 'outage' && (
+                <div className="space-y-3 bg-surface-2 p-3 rounded border border-border">
+                  <p className="text-content-secondary leading-relaxed text-[11px]">
+                    Simulates a scheduled maintenance outage window. Cross-references detected fault boundaries against planned maintenance schedules.
+                  </p>
+
+                  <div className="flex items-center gap-2 text-content-secondary text-[11px]">
+                    <Calendar className="w-4 h-4 text-amber-400 shrink-0" />
+                    <span>Feeder maintenance window active for FDR-01</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Active Simulation Status & Repair Action */}
+              <div className="pt-3 border-t border-border flex items-center justify-between text-xs">
+                <div>
+                  <span className="text-content-tertiary">Active simulation: </span>
+                  <span className={`font-medium ${hasActiveFault ? 'text-amber-400 font-mono' : 'text-content-secondary'}`}>
+                    {activeSimText}
+                  </span>
                 </div>
 
                 <button
                   onClick={() => runSim('repair', () => ApiClient.repairFault(dtId))}
                   disabled={!!loadingAction}
-                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 font-bold text-gray-950 rounded-xl transition flex items-center gap-2"
+                  className="px-3 py-1.5 bg-health-green hover:bg-emerald-600 font-semibold text-surface-0 rounded transition flex items-center gap-1 text-xs disabled:opacity-50"
                 >
-                  <Wrench className="w-4 h-4" />
-                  Repair & Restore Grid Power
+                  <Wrench className="w-3.5 h-3.5" />
+                  {hasActiveFault ? 'Repair Fault' : 'Restore Grid State'}
                 </button>
               </div>
             </div>
@@ -391,3 +380,4 @@ export const SimulatorPanel: React.FC<SimulatorPanelProps> = ({ onRefresh }) => 
     </>
   );
 };
+

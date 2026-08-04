@@ -11,9 +11,58 @@
 
 body {
   margin: 0;
-  background-color: #030712; /* gray-950 */
-  color: #f9fafb; /* gray-50 */
+  background-color: #111315;
+  color: #F2F1ED;
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/* Custom scrollbars for operational density */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: #15181B;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #2C3137;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #3A4047;
+}
+
+/* Leaflet Map Styling Overrides for Industrial Control Room */
+.dark-map-tiles .leaflet-tile-pane {
+  filter: brightness(0.7) invert(1) contrast(1.2) hue-rotate(200deg) saturate(0.3);
+}
+
+.leaflet-container {
+  background-color: #111315 !important;
+  font-family: 'Inter', system-ui, sans-serif !important;
+}
+
+.leaflet-popup-content-wrapper {
+  background: #1B1F23 !important;
+  color: #F2F1ED !important;
+  border: 1px solid #2C3137 !important;
+  border-radius: 6px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4) !important;
+  padding: 0 !important;
+}
+
+.leaflet-popup-content {
+  margin: 10px 12px !important;
+  line-height: 1.4 !important;
+}
+
+.leaflet-popup-tip {
+  background: #1B1F23 !important;
+  border: 1px solid #2C3137 !important;
+}
+
