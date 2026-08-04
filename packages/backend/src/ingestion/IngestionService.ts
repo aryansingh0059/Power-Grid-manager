@@ -38,6 +38,7 @@ export class IngestionService {
           bootCount: deviceDoc.bootCount,
           lastSeq: deviceDoc.lastSeq ?? null,
           lastSeenAt: deviceDoc.lastHeartbeatAt,
+          lastBootAt: deviceDoc.lastBootAt ?? null,
         }
       : null;
 
@@ -105,6 +106,7 @@ export class IngestionService {
               bootCount: decision.assignedBootCount,
               lastSeq: msg.seq,
               isOnline: true,
+              ...(msg.event === 'boot' ? { lastBootAt: eventTs } : {}),
               ...(msg.event === 'heartbeat' ? { lastHeartbeatAt: receivedAt } : {}),
             },
           },

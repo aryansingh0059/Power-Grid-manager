@@ -54,6 +54,7 @@ const TimelineEntrySchema = new Schema<TimelineEntry>(
 
 // ── Main document ─────────────────────────────────────────────────────────────
 export interface IIncident extends Omit<Incident, 'detectedAt' | 'acknowledgedAt' | 'crewAssignedAt' | 'resolvedAt' | 'verifiedAt' | 'closedAt'> {
+  faultKey?: string | null;
   detectedAt: Date;
   acknowledgedAt?: Date | null;
   crewAssignedAt?: Date | null;
@@ -67,6 +68,7 @@ export interface IIncident extends Omit<Incident, 'detectedAt' | 'acknowledgedAt
 const IncidentSchema = new Schema<IIncident & Document>(
   {
     incidentId: { type: String, required: true, unique: true, index: true },
+    faultKey: { type: String, default: null, index: true },
     faultType: {
       type: String,
       enum: [

@@ -5,6 +5,7 @@ export interface DeviceStateSnapshot {
   bootCount: number;
   lastSeq: number | null;
   lastSeenAt: Date | null;
+  lastBootAt?: Date | null;
 }
 
 export interface IngestionDecision {
@@ -42,7 +43,17 @@ export function evaluateIngestionState(
     lastSeq >= 10;
 
   const isBootReset = isExplicitBoot || isImplicitBootReset;
-  const assignedBootCount = isBootReset ? currentBootCount + 1 : currentBootCount;
+
+  // Check if message is timestamped before last known boot (stale retry from previous boot cycle)
+  const msgTsTime = new Date(msg.ts).getTime();
+  const lastBootTime = currentDeviceState?.lastBootAt ? currentDeviceState.lastBootAt.getTime() : 0;
+  const isPreBootStale = !isExplicitBoot && lastBootTime > 0 && msgTsTime < lastBootTime;
+
+  let assignedBootCount = isBootReset ? currentBootCount + 1 : currentBootCount;
+  if (isPreBootStale) {
+    assignedBootCount = Math.max(0, currentBootCount - 1);
+  }
+
 
   // 2. Check duplicate within the assigned boot generation
   const isDuplicate = knownProcessedSeqsInBoot.has(msg.seq);

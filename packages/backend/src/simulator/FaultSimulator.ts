@@ -1,11 +1,13 @@
 import { PoleModel } from '../db/models/Pole';
 import { DeviceModel } from '../db/models/Device';
 import { ScheduledOutageModel } from '../db/models/ScheduledOutage';
+import { ActiveFaultModel } from '../db/models/ActiveFault';
 import { IngestionService } from '../ingestion/IngestionService';
 import { IncidentService } from '../incidents/IncidentService';
 import { LocalizationEngine } from '../localization/LocalizationEngine';
 import { TopologyIndex } from '../topology/TopologyIndex';
 import type { PoleRecord, TelemetryMessage, ScheduledOutage } from '@pgm/shared';
+import type { LocalizedFault } from '../localization/types';
 
 export interface SimulationOptions {
   deterministic?: boolean;
@@ -23,38 +25,104 @@ export interface SimulationResult {
 
 export class FaultSimulator {
   /**
-   * Helper: Resolves pole document handling shorthand inputs like "P1", "P2", "P-010002", etc.
+   * Helper: Resolves pole document by exact or case-insensitive ID match without hardcoded DT fallbacks.
    */
-  private static async resolvePole(input: string, fallbackIdx = 0): Promise<any> {
-    if (!input) {
-      const dtPoles = await PoleModel.find({ dtId: 'DT-001' }).sort({ seqOnLine: 1, poleId: 1 }).lean();
-      return dtPoles[fallbackIdx] || dtPoles[0] || null;
-    }
-
+  public static async resolvePole(input: string): Promise<any> {
+    if (!input) return null;
     const cleanInput = input.trim();
 
     // 1. Exact match
     let pole = await PoleModel.findOne({ poleId: cleanInput }).lean();
     if (pole) return pole;
 
-    // 2. Regex match (e.g. "010002" or "P-010002")
+    // 2. Case-insensitive exact match
+    pole = await PoleModel.findOne({ poleId: new RegExp(`^${cleanInput}$`, 'i') }).lean();
+    if (pole) return pole;
+
+    // 3. Regex substring match (e.g. "010002" or "P-010002")
     pole = await PoleModel.findOne({ poleId: new RegExp(cleanInput, 'i') }).lean();
     if (pole) return pole;
 
-    // 3. Shorthand "P1", "P2", "P3", etc.
-    const numMatch = cleanInput.match(/^P-?(\d+)$/i);
-    if (numMatch) {
-      const idx = parseInt(numMatch[1], 10) - 1;
-      const dtPoles = await PoleModel.find({ dtId: 'DT-001' }).sort({ seqOnLine: 1, poleId: 1 }).lean();
-      if (dtPoles.length > idx && idx >= 0) {
-        return dtPoles[idx];
+    return null;
+  }
+
+  /**
+   * Helper: Dynamically find a recommended valid recorded span target around the middle of a recorded tree.
+   */
+  static async getRecommendedDemoTarget(): Promise<{
+    dtId: string;
+    upstreamPoleId: string;
+    downstreamPoleId: string;
+    affectedPoleCount: number;
+  }> {
+    const poles = await PoleModel.find().lean();
+    if (poles.length === 0) {
+      throw new Error('No poles found in grid database');
+    }
+
+    const topologyIndex = TopologyIndex.build(poles as PoleRecord[]);
+    const dtIds = Array.from(new Set(poles.map((p) => p.dtId)));
+
+    const candidates: Array<{
+      dtId: string;
+      upstreamPoleId: string;
+      downstreamPoleId: string;
+      affectedPoleCount: number;
+      depth: number;
+    }> = [];
+
+    for (const dtId of dtIds) {
+      const dtPoles = poles.filter((p) => p.dtId === dtId);
+      const isRecorded = dtPoles.some((p) => p.topologySource === 'recorded');
+      if (!isRecorded) continue;
+
+      for (const p of dtPoles) {
+        if (!p.parentPoleId) continue;
+        const upstreamId = p.parentPoleId;
+        const downstreamId = p.poleId;
+        const descendants = topologyIndex.getDescendantIds(downstreamId);
+        const affectedPoleCount = 1 + descendants.length;
+        const pathFromRoot = topologyIndex.getPathFromRoot(downstreamId);
+
+        if (affectedPoleCount >= 2) {
+          candidates.push({
+            dtId,
+            upstreamPoleId: upstreamId,
+            downstreamPoleId: downstreamId,
+            affectedPoleCount,
+            depth: pathFromRoot.length,
+          });
+        }
       }
     }
 
-    // 4. Fallback: get pole by fallback index in DT-001
-    const dtPoles = await PoleModel.find({ dtId: 'DT-001' }).sort({ seqOnLine: 1, poleId: 1 }).lean();
-    return dtPoles[fallbackIdx] || dtPoles[0] || null;
+    if (candidates.length === 0) {
+      for (const p of poles) {
+        if (p.parentPoleId) {
+          const descendants = topologyIndex.getDescendantIds(p.poleId);
+          return {
+            dtId: p.dtId,
+            upstreamPoleId: p.parentPoleId,
+            downstreamPoleId: p.poleId,
+            affectedPoleCount: 1 + descendants.length,
+          };
+        }
+      }
+      throw new Error('No valid parent-child span found in grid');
+    }
+
+    candidates.sort((a, b) => b.affectedPoleCount - a.affectedPoleCount);
+    const midIdx = Math.floor(candidates.length / 2);
+    const chosen = candidates[midIdx];
+
+    return {
+      dtId: chosen.dtId,
+      upstreamPoleId: chosen.upstreamPoleId,
+      downstreamPoleId: chosen.downstreamPoleId,
+      affectedPoleCount: chosen.affectedPoleCount,
+    };
   }
+
 
   /**
    * Helper: Resolves DT ID, handling shorthand "DT1" -> "DT-001"
@@ -101,6 +169,69 @@ export class FaultSimulator {
   }
 
   /**
+   * Core Electrical Grid Physics Evaluator.
+   *
+   * Recomputes physical energized state for every pole in the grid by evaluating
+   * ALL active physical faults against the radial network topology tree.
+   */
+  static async recomputeGridEnergizedState(): Promise<{
+    darkPoleIds: string[];
+    energizedPoleIds: string[];
+  }> {
+    const activeFaults = await ActiveFaultModel.find().lean();
+    const allPoles = await PoleModel.find().lean();
+    const topologyIndex = TopologyIndex.build(allPoles as PoleRecord[]);
+
+    const activeDarkFeeders = new Set(
+      activeFaults.filter((f) => f.faultType === 'feeder_fault').map((f) => f.feederId!)
+    );
+    const activeDarkDts = new Set(
+      activeFaults.filter((f) => f.faultType === 'dt_fault').map((f) => f.dtId!)
+    );
+    const activeSpanDarkRoots = new Set(
+      activeFaults.filter((f) => f.faultType === 'span_fault').map((f) => f.downstreamPoleId!)
+    );
+
+    const darkPoleIds: string[] = [];
+    const energizedPoleIds: string[] = [];
+    const now = new Date();
+
+    for (const pole of allPoles) {
+      const isFeederDark = activeDarkFeeders.has(pole.feederId);
+      const isDtDark = activeDarkDts.has(pole.dtId);
+
+      let isSpanDark = activeSpanDarkRoots.has(pole.poleId);
+      if (!isSpanDark && !isFeederDark && !isDtDark) {
+        const ancestors = topologyIndex.getAncestorIds(pole.poleId);
+        isSpanDark = ancestors.some((aId) => activeSpanDarkRoots.has(aId));
+      }
+
+      const isDark = isFeederDark || isDtDark || isSpanDark;
+
+      if (isDark) {
+        darkPoleIds.push(pole.poleId);
+      } else {
+        energizedPoleIds.push(pole.poleId);
+      }
+    }
+
+    if (darkPoleIds.length > 0) {
+      await PoleModel.updateMany(
+        { poleId: { $in: darkPoleIds } },
+        { $set: { energized: false, lastSeenAt: now } }
+      );
+    }
+    if (energizedPoleIds.length > 0) {
+      await PoleModel.updateMany(
+        { poleId: { $in: energizedPoleIds } },
+        { $set: { energized: true, lastSeenAt: now } }
+      );
+    }
+
+    return { darkPoleIds, energizedPoleIds };
+  }
+
+  /**
    * Inject a physical span fault between upstreamPoleId and downstreamPoleId.
    */
   static async injectSpanFault(
@@ -108,40 +239,64 @@ export class FaultSimulator {
     downstreamPoleInput: string,
     options: SimulationOptions = {}
   ): Promise<SimulationResult> {
-    const upstreamPole = await FaultSimulator.resolvePole(upstreamPoleInput, 0);
-    const downstreamPole = await FaultSimulator.resolvePole(downstreamPoleInput, 1);
+    const upstreamPole = await FaultSimulator.resolvePole(upstreamPoleInput);
+    const downstreamPole = await FaultSimulator.resolvePole(downstreamPoleInput);
 
     if (!upstreamPole || !downstreamPole) {
-      throw new Error(`Could not resolve poles for input ${upstreamPoleInput} / ${downstreamPoleInput}`);
+      const missingInput = !upstreamPole ? upstreamPoleInput : downstreamPoleInput;
+      throw new Error(`Pole "${missingInput}" not found`);
+    }
+
+    if (upstreamPole.dtId !== downstreamPole.dtId) {
+      throw new Error(
+        `Selected poles belong to different Distribution Transformers (${upstreamPole.dtId} vs ${downstreamPole.dtId}).`
+      );
     }
 
     const upstreamPoleId = upstreamPole.poleId;
     const downstreamPoleId = downstreamPole.poleId;
 
-    const allPoles = await PoleModel.find({ dtId: downstreamPole.dtId }).lean();
-    const topologyIndex = TopologyIndex.build(allPoles as PoleRecord[]);
+    const allDtPoles = await PoleModel.find({ dtId: downstreamPole.dtId }).lean();
+    const topologyIndex = TopologyIndex.build(allDtPoles as PoleRecord[]);
+
+    // Validate Electrical Span Adjacency
+    const actualParentId = topologyIndex.getParentId(downstreamPoleId);
+    if (actualParentId !== upstreamPoleId) {
+      throw new Error("Selected poles are not electrically adjacent.");
+    }
 
     const downstreamSubtree = [
       downstreamPoleId,
       ...topologyIndex.getDescendantIds(downstreamPoleId),
     ];
 
+    const faultId = `SPAN:${upstreamPoleId}:${downstreamPoleId}`;
+    await ActiveFaultModel.findOneAndUpdate(
+      { faultId },
+      {
+        faultId,
+        faultType: 'span_fault',
+        feederId: downstreamPole.feederId,
+        dtId: downstreamPole.dtId,
+        upstreamPoleId,
+        downstreamPoleId,
+      },
+      { upsert: true }
+    );
+
+    // Recompute effective electrical grid state
+    await FaultSimulator.recomputeGridEnergizedState();
+
     const deterministic = options.deterministic ?? true;
     const dropRate = options.dropRate ?? 0.3;
-
-    // Update physical state of affected poles in DB
-    await PoleModel.updateMany(
-      { poleId: { $in: downstreamSubtree } },
-      { $set: { energized: false, lastSeenAt: new Date() } }
-    );
 
     const devices = await DeviceModel.find({ poleId: { $in: downstreamSubtree } });
     let telemetryCount = 0;
 
     for (const dev of devices) {
       const isFw12 = dev.firmwareVersion.startsWith('1.2.');
-      if (isFw12) continue;
-      if (!deterministic && Math.random() < dropRate) continue;
+      if (isFw12) continue; // FW 1.2.x stays silent
+      if (!deterministic && Math.random() < dropRate) continue; // Dying packet loss
 
       const msg: TelemetryMessage = {
         device_id: dev.deviceId,
@@ -180,13 +335,25 @@ export class FaultSimulator {
     const dtPoles = await PoleModel.find({ dtId }).lean();
     const affectedPoleIds = dtPoles.map((p) => p.poleId);
 
+    const faultId = `DT:${dtId}`;
+    const feederId = dtPoles[0]?.feederId;
+
+    await ActiveFaultModel.findOneAndUpdate(
+      { faultId },
+      {
+        faultId,
+        faultType: 'dt_fault',
+        feederId,
+        dtId,
+      },
+      { upsert: true }
+    );
+
+    // Recompute effective electrical grid state
+    await FaultSimulator.recomputeGridEnergizedState();
+
     const deterministic = options.deterministic ?? true;
     const dropRate = options.dropRate ?? 0.3;
-
-    await PoleModel.updateMany(
-      { dtId },
-      { $set: { energized: false, lastSeenAt: new Date() } }
-    );
 
     const devices = await DeviceModel.find({ poleId: { $in: affectedPoleIds } });
     let telemetryCount = 0;
@@ -232,13 +399,22 @@ export class FaultSimulator {
     const feederPoles = await PoleModel.find({ feederId }).lean();
     const affectedPoleIds = feederPoles.map((p) => p.poleId);
 
+    const faultId = `FEEDER:${feederId}`;
+    await ActiveFaultModel.findOneAndUpdate(
+      { faultId },
+      {
+        faultId,
+        faultType: 'feeder_fault',
+        feederId,
+      },
+      { upsert: true }
+    );
+
+    // Recompute effective electrical grid state
+    await FaultSimulator.recomputeGridEnergizedState();
+
     const deterministic = options.deterministic ?? true;
     const dropRate = options.dropRate ?? 0.3;
-
-    await PoleModel.updateMany(
-      { feederId },
-      { $set: { energized: false, lastSeenAt: new Date() } }
-    );
 
     const devices = await DeviceModel.find({ poleId: { $in: affectedPoleIds } });
     let telemetryCount = 0;
@@ -275,6 +451,7 @@ export class FaultSimulator {
 
   /**
    * Simulate a device hardware failure while physical power remains healthy.
+   * Device failure NEVER alters the physical energized state of the pole.
    */
   static async killDevice(deviceInput: string): Promise<SimulationResult> {
     let device = await DeviceModel.findOne({ deviceId: deviceInput });
@@ -303,42 +480,29 @@ export class FaultSimulator {
 
   /**
    * Repair active faults, restoring physical power and emitting boot/power_restored telemetry.
-   * Smartly restores ALL dark poles across the network if no specific target is provided.
    */
   static async repairFault(
     dtInput?: string,
     downstreamPoleId?: string
   ): Promise<SimulationResult> {
-    let targetPoleIds: string[] = [];
-
     if (downstreamPoleId) {
-      const dtId = await FaultSimulator.resolveDt(dtInput || 'DT-001');
-      const allPoles = await PoleModel.find({ dtId }).lean();
-      const topologyIndex = TopologyIndex.build(allPoles as PoleRecord[]);
-      targetPoleIds = [
-        downstreamPoleId,
-        ...topologyIndex.getDescendantIds(downstreamPoleId),
-      ];
+      // Remove specific span fault
+      await ActiveFaultModel.deleteMany({ downstreamPoleId });
+    } else if (dtInput) {
+      const dtId = await FaultSimulator.resolveDt(dtInput);
+      // Remove active DT fault & span faults under this DT
+      await ActiveFaultModel.deleteMany({ dtId });
     } else {
-      // Find all dark poles currently in the database
-      const darkPoles = await PoleModel.find({ energized: false }).lean();
-      targetPoleIds = darkPoles.map((p) => p.poleId);
-
-      // Fallback: if no dark poles found, target DT-001 poles
-      if (targetPoleIds.length === 0) {
-        const dtId = await FaultSimulator.resolveDt(dtInput || 'DT-001');
-        const dtPoles = await PoleModel.find({ dtId }).lean();
-        targetPoleIds = dtPoles.map((p) => p.poleId);
-      }
+      // General repair — remove all active physical faults
+      await ActiveFaultModel.deleteMany({});
     }
 
-    const now = new Date();
-    await PoleModel.updateMany(
-      { poleId: { $in: targetPoleIds } },
-      { $set: { energized: true, lastSeenAt: now } }
-    );
+    // Recompute effective grid state after fault removal
+    const { energizedPoleIds } = await FaultSimulator.recomputeGridEnergizedState();
 
-    const devices = await DeviceModel.find({ poleId: { $in: targetPoleIds } });
+    // Emit restoration telemetry for re-energized poles
+    const now = new Date();
+    const devices = await DeviceModel.find({ poleId: { $in: energizedPoleIds } });
     let telemetryCount = 0;
 
     for (const dev of devices) {
@@ -376,10 +540,10 @@ export class FaultSimulator {
     return {
       success: true,
       action: 'repair_fault',
-      affectedPoleCount: targetPoleIds.length,
+      affectedPoleCount: energizedPoleIds.length,
       affectedDeviceCount: devices.length,
       telemetryEmittedCount: telemetryCount,
-      message: `Repaired physical grid faults (${targetPoleIds.length} poles re-energized, ${telemetryCount} restoration events emitted, ${closedCount} incidents auto-closed).`,
+      message: `Repaired physical grid faults (${energizedPoleIds.length} poles re-energized, ${telemetryCount} restoration events emitted, ${closedCount} incidents auto-closed).`,
     };
   }
 
@@ -439,7 +603,53 @@ export class FaultSimulator {
     const dtIds = Array.from(new Set(poles.map((p) => p.dtId)));
     let createdCount = 0;
 
+    // Check for Feeder-level Outages first across all feeders
+    const feederIds = Array.from(new Set(poles.map((p) => p.feederId)));
+    const feederOutageSet = new Set<string>();
+
+    for (const fId of feederIds) {
+      const fPoles = poles.filter((p) => p.feederId === fId);
+      const allFPolesDark = fPoles.every((p) => p.energized === false);
+      if (allFPolesDark && fPoles.length > 0) {
+        feederOutageSet.add(fId);
+
+        const firstPole = fPoles[0];
+        const affectedPoleIds = fPoles.map((p) => p.poleId);
+        const dtCount = new Set(fPoles.map((p) => p.dtId)).size;
+        const avgLat = Number((fPoles.reduce((s, p) => s + p.lat, 0) / fPoles.length).toFixed(6));
+        const avgLon = Number((fPoles.reduce((s, p) => s + p.lon, 0) / fPoles.length).toFixed(6));
+
+        const feederFault: LocalizedFault = {
+          faultType: 'feeder_fault',
+          feederId: fId,
+          dtId: firstPole.dtId,
+          upstreamPoleId: null,
+          downstreamPoleId: null,
+          boundaryDescription: `11kV Feeder ${fId} outage — ${dtCount} DTs and ${affectedPoleIds.length} poles dark`,
+          lat: avgLat,
+          lon: avgLon,
+          pincode: firstPole.pincode,
+          affectedPoleIds,
+          affectedPoleCount: affectedPoleIds.length,
+          reasons: [`11kV Feeder breaker tripped — 100% of ${affectedPoleIds.length} poles on feeder ${fId} dark`],
+          confidence: 98,
+          topologySource: 'recorded',
+          precision: 'DT_LEVEL',
+          isAmbiguous: false,
+        };
+
+        await IncidentService.createOrCorrelateIncident(feederFault);
+        createdCount++;
+      }
+    }
+
+    // Localize DTs not covered by a feeder outage
     for (const dtId of dtIds) {
+      const dtPoles = poles.filter((p) => p.dtId === dtId);
+      if (dtPoles.length > 0 && feederOutageSet.has(dtPoles[0].feederId)) {
+        continue; // Skip DT-level ticket generation if feeder outage is active
+      }
+
       const detectedFaults = LocalizationEngine.localizeDt(
         topologyIndex,
         poleStateMap,

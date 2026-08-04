@@ -12,16 +12,47 @@ export interface VerificationResult {
 
 export class IncidentService {
   /**
+   * Helper: Builds a deterministic fault key identity.
+   */
+  static buildFaultKey(fault: LocalizedFault): string {
+    if (fault.faultType === 'feeder_fault') {
+      return `FEEDER_FAULT:${fault.feederId}`;
+    }
+    if (fault.faultType === 'dt_fault') {
+      return `DT_FAULT:${fault.dtId}`;
+    }
+    if (fault.faultType === 'span_fault') {
+      return `SPAN_FAULT:${fault.dtId}:${fault.upstreamPoleId || 'ROOT'}:${fault.downstreamPoleId}`;
+    }
+    return `FAULT:${fault.dtId || fault.feederId}`;
+  }
+
+  /**
    * Correlates a localized fault with existing active tickets or creates a new incident.
    */
   static async createOrCorrelateIncident(fault: LocalizedFault): Promise<IIncident> {
-    // Search for existing active incident under same DT with matching downstream pole or overlapping affected poles
+    const faultKey = IncidentService.buildFaultKey(fault);
+
+    // Search for existing active (NON-CLOSED) incident matching faultKey or boundary
     const activeIncidents = await IncidentModel.find({
-      dtId: fault.dtId,
-      status: { $in: ['detected', 'acknowledged', 'crew_assigned'] },
+      status: { $ne: 'closed' },
+      $or: [
+        { faultKey },
+        { dtId: fault.dtId },
+        { feederId: fault.feederId },
+      ],
     });
 
     const matchingIncident = activeIncidents.find((inc) => {
+      if (inc.faultKey && inc.faultKey === faultKey) {
+        return true;
+      }
+      if (fault.faultType === 'feeder_fault') {
+        return inc.feederId === fault.feederId && inc.faultType === 'feeder_fault';
+      }
+      if (fault.faultType === 'dt_fault') {
+        return inc.dtId === fault.dtId && inc.faultType === 'dt_fault';
+      }
       // Direct boundary match
       if (
         inc.boundary.downstreamPoleId === fault.downstreamPoleId &&
@@ -47,6 +78,9 @@ export class IncidentService {
       matchingIncident.affectedPoleCount = combinedPoles.length;
       matchingIncident.lat = fault.lat;
       matchingIncident.lon = fault.lon;
+      if (!matchingIncident.faultKey) {
+        matchingIncident.faultKey = faultKey;
+      }
       matchingIncident.boundary = {
         upstreamPoleId: fault.upstreamPoleId,
         downstreamPoleId: fault.downstreamPoleId,
@@ -56,12 +90,17 @@ export class IncidentService {
         confidence: fault.confidence / 100, // 0..1 scale for DB subdoc
       };
 
-      matchingIncident.timeline.push({
-        at: nowIso,
-        status: matchingIncident.status,
-        note: `Telemetry signal correlated — updated boundary to ${fault.boundaryDescription} (${combinedPoles.length} poles affected)`,
-        automated: true,
-      });
+      // PREVENT TIMELINE SPAM: Only append timeline note if changed
+      const lastTimeline = matchingIncident.timeline[matchingIncident.timeline.length - 1];
+      const newNote = `Telemetry signal correlated — updated boundary to ${fault.boundaryDescription} (${combinedPoles.length} poles affected)`;
+      if (!lastTimeline || lastTimeline.note !== newNote) {
+        matchingIncident.timeline.push({
+          at: nowIso,
+          status: matchingIncident.status,
+          note: newNote,
+          automated: true,
+        });
+      }
 
       await matchingIncident.save();
       SocketServer.emitIncidentUpdated(matchingIncident);
@@ -78,6 +117,7 @@ export class IncidentService {
 
     const newIncident = await IncidentModel.create({
       incidentId,
+      faultKey,
       faultType: fault.faultType,
       status: 'detected',
       feederId: fault.feederId,
@@ -206,22 +246,29 @@ export class IncidentService {
     // Fetch current energization state of all affected poles
     const poles = await PoleModel.find({ poleId: { $in: incident.affectedPoleIds } });
 
-    // Dark poles are those with a device that explicitly report energized === false
-    const darkPoles = poles.filter((p) => p.deviceId && p.energized === false);
-    const darkCount = darkPoles.length;
+    // Separate instrumented poles (with telemetry devices) from uninstrumented poles
+    const instrumentedPoles = poles.filter((p) => Boolean(p.deviceId));
+    const darkInstrumentedPoles = instrumentedPoles.filter((p) => p.energized === false);
+    const darkCount = darkInstrumentedPoles.length;
     const now = new Date();
 
     if (darkCount === 0) {
-      // Telemetry verification SUCCEEDED!
+      // Telemetry verification SUCCEEDED! All observable (instrumented) poles report energized.
       incident.status = 'closed';
       incident.verifiedAt = now;
       incident.closedAt = now;
-      incident.timeline.push({
-        at: now.toISOString(),
-        status: 'verified',
-        note: `Restoration telemetry verified: All ${incident.affectedPoleIds.length} affected poles confirmed energized. Ticket closed automatically.`,
-        automated: true,
-      });
+
+      const successNote = `Restoration telemetry verified: All ${instrumentedPoles.length} observable instrumented poles confirmed energized. Ticket closed automatically.`;
+
+      const lastTimeline = incident.timeline[incident.timeline.length - 1];
+      if (!lastTimeline || lastTimeline.note !== successNote || lastTimeline.status !== 'closed') {
+        incident.timeline.push({
+          at: now.toISOString(),
+          status: 'closed',
+          note: successNote,
+          automated: true,
+        });
+      }
 
       await incident.save();
       SocketServer.emitIncidentVerified(incident);
@@ -231,25 +278,30 @@ export class IncidentService {
         verified: true,
         incident,
         darkPoleCount: 0,
-        message: 'All affected poles confirmed energized. Incident verified and closed.',
+        message: `All ${instrumentedPoles.length} observable poles confirmed energized. Incident verified and closed.`,
       };
     } else {
-      // Verification FAILED — poles remain dark!
-      incident.timeline.push({
-        at: now.toISOString(),
-        status: incident.status,
-        note: `Restoration verification pending: ${darkCount} of ${incident.affectedPoleIds.length} affected poles remain de-energized.`,
-        automated: true,
-      });
+      // Verification PENDING — dark observable poles remain
+      const pendingNote = `Restoration verification pending: ${darkCount} of ${instrumentedPoles.length} observable poles remain de-energized.`;
 
-      await incident.save();
-      SocketServer.emitIncidentUpdated(incident);
+      // PREVENT TIMELINE SPAM: Only append note if it changed
+      const lastTimeline = incident.timeline[incident.timeline.length - 1];
+      if (!lastTimeline || lastTimeline.note !== pendingNote) {
+        incident.timeline.push({
+          at: now.toISOString(),
+          status: incident.status,
+          note: pendingNote,
+          automated: true,
+        });
+        await incident.save();
+        SocketServer.emitIncidentUpdated(incident);
+      }
 
       return {
         verified: false,
         incident,
         darkPoleCount: darkCount,
-        message: `${darkCount} affected poles remain de-energized. Incident remains in ${incident.status} state.`,
+        message: `${darkCount} of ${instrumentedPoles.length} observable poles remain de-energized. Incident remains in ${incident.status} state.`,
       };
     }
   }

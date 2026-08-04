@@ -84,13 +84,24 @@ export const ApiClient = {
       method: 'POST',
       body: JSON.stringify({ deviceId }),
     }),
-  repairFault: (dtId: string, downstreamPoleId?: string) =>
+  repairFault: (dtId?: string, downstreamPoleId?: string) =>
     fetchJson<{ message: string }>('/api/simulator/repair', {
       method: 'POST',
       body: JSON.stringify({ dtId, downstreamPoleId }),
     }),
   runLocalization: () =>
     fetchJson<{ incidentsCreatedOrUpdated: number }>('/api/simulator/run-localization', {
+      method: 'POST',
+    }),
+  getRecommendedDemoTarget: () =>
+    fetchJson<{
+      dtId: string;
+      upstreamPoleId: string;
+      downstreamPoleId: string;
+      affectedPoleCount: number;
+    }>('/api/simulator/recommended-target'),
+  resetDatabase: () =>
+    fetchJson<{ message: string }>('/api/simulator/reset-database', {
       method: 'POST',
     }),
 };
