@@ -13,6 +13,13 @@ app.use(cors());
 app.use(express.json());
 
 // ─── Routes ──────────────────────────────────────────────────────────────────
+app.get('/', (_req, res) => {
+  res.json({
+    success: true,
+    message: 'Power Grid Manager API Server is Online',
+    health: '/api/health',
+  });
+});
 app.use('/api/health', healthRouter);
 app.use('/api/telemetry', telemetryRouter);
 app.use('/api/incidents', incidentsRouter);
