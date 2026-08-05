@@ -8,7 +8,7 @@ Developed for electricity distribution utilities (demonstrated on Karnataka Stat
 
 ## Live Demo & Links
 
-- **Live Application**: [ADD PUBLIC URL BEFORE SUBMISSION]
+- **Live Application**: [https://power-grid-manager-frontend.vercel.app/](https://power-grid-manager-frontend.vercel.app/)
 - **Demo Video**: [ADD DEMO VIDEO URL BEFORE SUBMISSION]
 - **Repository**: [https://github.com/aryansingh0059/Power-Grid-manager.git](https://github.com/aryansingh0059/Power-Grid-manager.git)
 
