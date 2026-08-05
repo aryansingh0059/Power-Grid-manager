@@ -9,7 +9,7 @@ Developed for electricity distribution utilities (demonstrated on Karnataka Stat
 ## Live Demo & Links
 
 - **Live Application**: [https://power-grid-manager-frontend.vercel.app/](https://power-grid-manager-frontend.vercel.app/)
-- **Demo Video**: [ADD DEMO VIDEO URL BEFORE SUBMISSION]
+- **Demo Video**: [https://youtu.be/Yx-bW1IpISs](https://youtu.be/Yx-bW1IpISs)
 - **Repository**: [https://github.com/aryansingh0059/Power-Grid-manager.git](https://github.com/aryansingh0059/Power-Grid-manager.git)
 
 *Note: If accessing a public deployment on a free-tier hosting platform, a cold start delay of 30–60 seconds may occur on initial API request.*
